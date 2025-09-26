@@ -1,0 +1,1803 @@
+openapi: 3.0.3
+info:
+  title: Live Streaming Tipping Platform API
+  description: |
+    Secure, scalable live-streaming platform where performers broadcast video, 
+    viewers watch, and viewers tip virtual tokens in real time.
+    
+    ## Key Features
+    - Real-time WebRTC streaming with SFU
+    - Virtual token economy with instant tipping
+    - Age verification and KYC compliance
+    - Automated and human moderation
+    - PCI-compliant payment processing
+    
+    ## Authentication
+    All endpoints require JWT authentication except registration, login, and public endpoints.
+    Include the JWT token in the Authorization header: `Bearer <token>`
+    
+    ## Rate Limiting
+    - General API: 1000 requests/hour per user
+    - Streaming endpoints: 100 requests/minute per user
+    - Payment endpoints: 10 requests/minute per user
+    - Tipping: 60 tips/minute per user
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: api-support@livepanty.com
+  license:
+    name: Proprietary
+servers:
+  - url: https://api.livepanty.com/v1
+    description: Production server
+  - url: https://staging-api.livepanty.com/v1
+    description: Staging server
+  - url: http://localhost:3000/v1
+    description: Development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ============================================================================
+  # AUTHENTICATION ENDPOINTS
+  # ============================================================================
+  /auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new user account
+      description: Create a new user account with email verification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and return JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate current session
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logged out successfully"
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user profile
+      description: Retrieve current authenticated user's profile
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh JWT token
+      description: Get a new JWT token using refresh token
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  # ============================================================================
+  # USER MANAGEMENT ENDPOINTS
+  # ============================================================================
+  /users/{userId}:
+    get:
+      tags:
+        - Users
+      summary: Get user profile
+      description: Retrieve public user profile information
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUserProfile'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - Users
+      summary: Update user profile
+      description: Update current user's profile information
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /users/{userId}/preferences:
+    get:
+      tags:
+        - Users
+      summary: Get user preferences
+      description: Retrieve current user's preferences and settings
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: User preferences retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferences'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    patch:
+      tags:
+        - Users
+      summary: Update user preferences
+      description: Update current user's preferences and settings
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Preferences updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferences'
+
+  # ============================================================================
+  # KYC & VERIFICATION ENDPOINTS
+  # ============================================================================
+  /kyc/submit:
+    post:
+      tags:
+        - KYC
+      summary: Submit KYC documents
+      description: Submit identity documents for age verification
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                document_type:
+                  type: string
+                  enum: [drivers_license, passport, national_id]
+                document_front:
+                  type: string
+                  format: binary
+                document_back:
+                  type: string
+                  format: binary
+                selfie:
+                  type: string
+                  format: binary
+                verification_type:
+                  type: string
+                  enum: [age_verification, identity_verification, performer_verification]
+                  default: age_verification
+      responses:
+        '201':
+          description: KYC submission received
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KYCSubmission'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /kyc/{kycId}/status:
+    get:
+      tags:
+        - KYC
+      summary: Get KYC verification status
+      description: Check the status of a KYC verification request
+      parameters:
+        - name: kycId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: KYC status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KYCStatus'
+
+  /kyc/verifications:
+    get:
+      tags:
+        - KYC
+      summary: Get user's KYC verifications
+      description: Retrieve all KYC verification attempts for current user
+      responses:
+        '200':
+          description: KYC verifications retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KYCVerification'
+
+  # ============================================================================
+  # WALLET & TOKEN ENDPOINTS
+  # ============================================================================
+  /wallet/balance:
+    get:
+      tags:
+        - Wallet
+      summary: Get wallet balance
+      description: Retrieve current user's token balance
+      responses:
+        '200':
+          description: Wallet balance retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletBalance'
+
+  /wallet/buy:
+    post:
+      tags:
+        - Wallet
+      summary: Initiate token purchase
+      description: Start the process to buy tokens with real currency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuyTokensRequest'
+      responses:
+        '200':
+          description: Payment session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /wallet/transactions:
+    get:
+      tags:
+        - Wallet
+      summary: Get transaction history
+      description: Retrieve user's transaction history
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [token_purchase, tip_sent, tip_received, payout_request, payout_completed, refund]
+      responses:
+        '200':
+          description: Transaction history retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionHistory'
+
+  /wallet/transfer:
+    post:
+      tags:
+        - Wallet
+      summary: Send tip to performer
+      description: Send tokens as a tip during a live stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TipRequest'
+      responses:
+        '200':
+          description: Tip sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '402':
+          description: Insufficient balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================================
+  # STREAMING ENDPOINTS
+  # ============================================================================
+  /streams:
+    get:
+      tags:
+        - Streaming
+      summary: Get live streams
+      description: Retrieve list of currently live streams
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Live streams retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamList'
+
+    post:
+      tags:
+        - Streaming
+      summary: Create new stream
+      description: Create a new streaming session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStreamRequest'
+      responses:
+        '201':
+          description: Stream created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamSession'
+
+  /streams/{streamId}:
+    get:
+      tags:
+        - Streaming
+      summary: Get stream details
+      description: Retrieve detailed information about a specific stream
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+      responses:
+        '200':
+          description: Stream details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - Streaming
+      summary: Update stream
+      description: Update stream information (title, description, etc.)
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStreamRequest'
+      responses:
+        '200':
+          description: Stream updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamDetails'
+
+    delete:
+      tags:
+        - Streaming
+      summary: End stream
+      description: End the streaming session
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+      responses:
+        '200':
+          description: Stream ended successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Stream ended successfully"
+
+  /streams/{streamId}/start:
+    post:
+      tags:
+        - Streaming
+      summary: Start streaming
+      description: Mark stream as started and begin broadcasting
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+      responses:
+        '200':
+          description: Stream started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamSession'
+
+  /streams/{streamId}/join:
+    post:
+      tags:
+        - Streaming
+      summary: Join stream as viewer
+      description: Join a live stream as a viewer
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                viewer_token:
+                  type: string
+                  description: Token for viewer authentication
+      responses:
+        '200':
+          description: Successfully joined stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamJoinResponse'
+
+  /streams/{streamId}/viewers:
+    get:
+      tags:
+        - Streaming
+      summary: Get stream viewers
+      description: Retrieve list of current viewers for a stream
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+      responses:
+        '200':
+          description: Stream viewers retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  viewers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StreamViewer'
+
+  /streams/{streamId}/tips:
+    get:
+      tags:
+        - Streaming
+      summary: Get stream tips
+      description: Retrieve tips received during a stream
+      parameters:
+        - $ref: '#/components/parameters/StreamIdPath'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Stream tips retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tips:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tip'
+
+  # ============================================================================
+  # PAYOUT ENDPOINTS
+  # ============================================================================
+  /payouts/request:
+    post:
+      tags:
+        - Payouts
+      summary: Request payout
+      description: Request a payout of earned tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutRequest'
+      responses:
+        '201':
+          description: Payout request submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /payouts/requests:
+    get:
+      tags:
+        - Payouts
+      summary: Get payout requests
+      description: Retrieve user's payout request history
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [requested, pending, processing, completed, failed, cancelled]
+      responses:
+        '200':
+          description: Payout requests retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payouts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PayoutRequest'
+
+  # ============================================================================
+  # MODERATION ENDPOINTS
+  # ============================================================================
+  /moderation/report:
+    post:
+      tags:
+        - Moderation
+      summary: Report content or user
+      description: Submit a report for inappropriate content or behavior
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+      responses:
+        '201':
+          description: Report submitted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report_id:
+                    type: string
+                    format: uuid
+                  message:
+                    type: string
+                    example: "Report submitted successfully"
+
+  /moderation/flags:
+    get:
+      tags:
+        - Moderation
+      summary: Get moderation flags (Admin only)
+      description: Retrieve moderation flags for review
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, reviewed, action_taken, dismissed]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, urgent]
+      responses:
+        '200':
+          description: Moderation flags retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flags:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ModerationFlag'
+
+  # ============================================================================
+  # ADMIN ENDPOINTS
+  # ============================================================================
+  /admin/users:
+    get:
+      tags:
+        - Admin
+      summary: Get all users (Admin only)
+      description: Retrieve list of all users with pagination
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [viewer, performer, admin, moderator]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, suspended, banned, pending_verification]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Users retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserSummary'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /admin/kyc/{kycId}/approve:
+    post:
+      tags:
+        - Admin
+      summary: Approve KYC verification (Admin only)
+      description: Approve or reject a KYC verification request
+      parameters:
+        - name: kycId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [approve, reject]
+                reason:
+                  type: string
+                  description: Reason for rejection (if applicable)
+      responses:
+        '200':
+          description: KYC action completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /admin/analytics/overview:
+    get:
+      tags:
+        - Admin
+      summary: Get platform analytics (Admin only)
+      description: Retrieve platform-wide analytics and metrics
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month, year]
+            default: week
+      responses:
+        '200':
+          description: Analytics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAnalytics'
+
+# ============================================================================
+# COMPONENTS
+# ============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    UserIdPath:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: User ID
+
+    StreamIdPath:
+      name: streamId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Stream ID
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ============================================================================
+    # AUTHENTICATION SCHEMAS
+    # ============================================================================
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - display_name
+        - date_of_birth
+        - country
+      properties:
+        email:
+          type: string
+          format: email
+          example: "user@example.com"
+        password:
+          type: string
+          minLength: 8
+          example: "SecurePass123!"
+        display_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "John Doe"
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: "^[a-zA-Z0-9_]+$"
+          example: "johndoe"
+        date_of_birth:
+          type: string
+          format: date
+          example: "1990-01-01"
+        country:
+          type: string
+          pattern: "^[A-Z]{2}$"
+          example: "US"
+        role:
+          type: string
+          enum: [viewer, performer]
+          default: viewer
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "user@example.com"
+        password:
+          type: string
+          example: "SecurePass123!"
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refresh_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        expires_in:
+          type: integer
+          example: 3600
+        token_type:
+          type: string
+          example: "Bearer"
+        user:
+          $ref: '#/components/schemas/UserProfile'
+
+    # ============================================================================
+    # USER SCHEMAS
+    # ============================================================================
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          enum: [viewer, performer, admin, moderator]
+        status:
+          type: string
+          enum: [active, suspended, banned, pending_verification]
+        country:
+          type: string
+        timezone:
+          type: string
+        date_of_birth:
+          type: string
+          format: date
+        profile_image_url:
+          type: string
+          format: uri
+        bio:
+          type: string
+        is_public:
+          type: boolean
+        email_verified:
+          type: boolean
+        two_factor_enabled:
+          type: boolean
+        last_login_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PublicUserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        username:
+          type: string
+        country:
+          type: string
+        profile_image_url:
+          type: string
+          format: uri
+        bio:
+          type: string
+        is_public:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: "^[a-zA-Z0-9_]+$"
+        bio:
+          type: string
+          maxLength: 500
+        profile_image_url:
+          type: string
+          format: uri
+        is_public:
+          type: boolean
+        timezone:
+          type: string
+
+    UserPreferences:
+      type: object
+      properties:
+        notification_email:
+          type: boolean
+        notification_push:
+          type: boolean
+        notification_tips:
+          type: boolean
+        notification_followers:
+          type: boolean
+        language:
+          type: string
+          example: "en"
+        currency:
+          type: string
+          example: "USD"
+        timezone:
+          type: string
+          example: "UTC"
+        privacy_level:
+          type: string
+          enum: [strict, standard, open]
+        allow_private_messages:
+          type: boolean
+        allow_followers:
+          type: boolean
+
+    UpdatePreferencesRequest:
+      type: object
+      properties:
+        notification_email:
+          type: boolean
+        notification_push:
+          type: boolean
+        notification_tips:
+          type: boolean
+        notification_followers:
+          type: boolean
+        language:
+          type: string
+        currency:
+          type: string
+        timezone:
+          type: string
+        privacy_level:
+          type: string
+          enum: [strict, standard, open]
+        allow_private_messages:
+          type: boolean
+        allow_followers:
+          type: boolean
+
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+        country:
+          type: string
+        email_verified:
+          type: boolean
+        last_login_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        token_balance:
+          type: integer
+        kyc_status:
+          type: string
+
+    # ============================================================================
+    # KYC SCHEMAS
+    # ============================================================================
+    KYCSubmission:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, in_review, approved, rejected, expired]
+        verification_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    KYCStatus:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, in_review, approved, rejected, expired]
+        verification_type:
+          type: string
+        verification_score:
+          type: number
+          format: float
+        rejection_reason:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    KYCVerification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        verification_type:
+          type: string
+        document_type:
+          type: string
+        verification_score:
+          type: number
+          format: float
+        rejection_reason:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    # ============================================================================
+    # WALLET SCHEMAS
+    # ============================================================================
+    WalletBalance:
+      type: object
+      properties:
+        token_balance:
+          type: integer
+          example: 1500
+        reserved_balance:
+          type: integer
+          example: 100
+        currency_code:
+          type: string
+          example: "USD"
+        conversion_rate:
+          type: number
+          format: float
+          example: 100.0
+
+    BuyTokensRequest:
+      type: object
+      required:
+        - amount_tokens
+        - currency_code
+      properties:
+        amount_tokens:
+          type: integer
+          minimum: 100
+          maximum: 10000
+          example: 1000
+        currency_code:
+          type: string
+          enum: [USD, EUR, GBP, CAD]
+          example: "USD"
+        payment_method:
+          type: string
+          enum: [card, bank_transfer, crypto]
+          default: card
+
+    PaymentSession:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        checkout_url:
+          type: string
+          format: uri
+        amount_tokens:
+          type: integer
+        amount_currency:
+          type: number
+          format: float
+        currency_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    TransactionHistory:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerTransaction'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    LedgerTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        transaction_type:
+          type: string
+        amount_tokens:
+          type: integer
+        amount_currency:
+          type: number
+          format: float
+        fee_tokens:
+          type: integer
+        balance_after:
+          type: integer
+        description:
+          type: string
+        reference_id:
+          type: string
+          format: uuid
+        reference_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TipRequest:
+      type: object
+      required:
+        - stream_id
+        - to_user_id
+        - tokens
+      properties:
+        stream_id:
+          type: string
+          format: uuid
+        to_user_id:
+          type: string
+          format: uuid
+        tokens:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          example: 100
+        message:
+          type: string
+          maxLength: 200
+        is_private:
+          type: boolean
+          default: false
+
+    TipResponse:
+      type: object
+      properties:
+        tip_id:
+          type: string
+          format: uuid
+        ledger_tx_id:
+          type: string
+          format: uuid
+        tokens:
+          type: integer
+        fee_tokens:
+          type: integer
+        balance_after:
+          type: integer
+        message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Tip:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        from_user_id:
+          type: string
+          format: uuid
+        to_user_id:
+          type: string
+          format: uuid
+        tokens:
+          type: integer
+        message:
+          type: string
+        is_private:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # ============================================================================
+    # STREAMING SCHEMAS
+    # ============================================================================
+    CreateStreamRequest:
+      type: object
+      required:
+        - title
+        - category
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: "My Amazing Stream"
+        description:
+          type: string
+          maxLength: 1000
+        category:
+          type: string
+          example: "entertainment"
+        tags:
+          type: array
+          items:
+            type: string
+          maxItems: 10
+        is_private:
+          type: boolean
+          default: false
+        is_age_restricted:
+          type: boolean
+          default: true
+        tip_enabled:
+          type: boolean
+          default: true
+        chat_enabled:
+          type: boolean
+          default: true
+        recording_enabled:
+          type: boolean
+          default: false
+
+    StreamSession:
+      type: object
+      properties:
+        stream_id:
+          type: string
+          format: uuid
+        signaling_url:
+          type: string
+          format: uri
+        sfu_room_id:
+          type: string
+        turn_servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TURNServer'
+        viewer_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    TURNServer:
+      type: object
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+        username:
+          type: string
+        credential:
+          type: string
+
+    StreamDetails:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        host_id:
+          type: string
+          format: uuid
+        host_name:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        is_private:
+          type: boolean
+        is_age_restricted:
+          type: boolean
+        tip_enabled:
+          type: boolean
+        chat_enabled:
+          type: boolean
+        status:
+          type: string
+          enum: [created, starting, live, ended, suspended, banned]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        viewer_count:
+          type: integer
+        peak_viewer_count:
+          type: integer
+        total_tips_received:
+          type: integer
+        total_tokens_received:
+          type: integer
+        thumbnail_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+
+    StreamList:
+      type: object
+      properties:
+        streams:
+          type: array
+          items:
+            $ref: '#/components/schemas/StreamSummary'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    StreamSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        host_id:
+          type: string
+          format: uuid
+        host_name:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        is_private:
+          type: boolean
+        viewer_count:
+          type: integer
+        total_tokens_received:
+          type: integer
+        thumbnail_url:
+          type: string
+          format: uri
+        started_at:
+          type: string
+          format: date-time
+
+    UpdateStreamRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+          maxItems: 10
+        tip_enabled:
+          type: boolean
+        chat_enabled:
+          type: boolean
+
+    StreamJoinResponse:
+      type: object
+      properties:
+        stream_id:
+          type: string
+          format: uuid
+        signaling_url:
+          type: string
+          format: uri
+        sfu_room_id:
+          type: string
+        turn_servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TURNServer'
+        viewer_token:
+          type: string
+
+    StreamViewer:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        username:
+          type: string
+        profile_image_url:
+          type: string
+          format: uri
+        joined_at:
+          type: string
+          format: date-time
+        total_tips_sent:
+          type: integer
+        total_tokens_spent:
+          type: integer
+
+    # ============================================================================
+    # PAYOUT SCHEMAS
+    # ============================================================================
+    PayoutRequest:
+      type: object
+      required:
+        - amount_tokens
+        - payout_method
+        - payout_details
+      properties:
+        amount_tokens:
+          type: integer
+          minimum: 1000
+          example: 5000
+        payout_method:
+          type: string
+          enum: [bank_transfer, paypal, crypto]
+        payout_details:
+          type: object
+          description: "Encrypted payout details (bank account, PayPal email, etc.)"
+
+    PayoutResponse:
+      type: object
+      properties:
+        payout_id:
+          type: string
+          format: uuid
+        amount_tokens:
+          type: integer
+        amount_currency:
+          type: number
+          format: float
+        processing_fee:
+          type: number
+          format: float
+        net_amount:
+          type: number
+          format: float
+        status:
+          type: string
+          enum: [requested, pending, processing, completed, failed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    # ============================================================================
+    # MODERATION SCHEMAS
+    # ============================================================================
+    ReportRequest:
+      type: object
+      required:
+        - target_type
+        - target_id
+        - report_type
+        - reason
+      properties:
+        target_type:
+          type: string
+          enum: [user, stream, message, tip]
+        target_id:
+          type: string
+          format: uuid
+        report_type:
+          type: string
+          enum: [inappropriate_content, harassment, spam, underage, fraud, payment_issue, other]
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 1000
+        evidence_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          maxItems: 5
+
+    ModerationFlag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        target_type:
+          type: string
+        target_id:
+          type: string
+          format: uuid
+        flag_type:
+          type: string
+        confidence_score:
+          type: number
+          format: float
+        detection_model:
+          type: string
+        status:
+          type: string
+        reviewed_by:
+          type: string
+          format: uuid
+        reviewed_at:
+          type: string
+          format: date-time
+        action_taken:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ============================================================================
+    # ADMIN SCHEMAS
+    # ============================================================================
+    PlatformAnalytics:
+      type: object
+      properties:
+        period:
+          type: string
+        total_users:
+          type: integer
+        active_performers:
+          type: integer
+        total_streams:
+          type: integer
+        active_streams:
+          type: integer
+        total_viewers:
+          type: integer
+        total_tips:
+          type: integer
+        total_tokens_tipped:
+          type: integer
+        total_revenue:
+          type: number
+          format: float
+        average_stream_duration:
+          type: integer
+        kyc_pending:
+          type: integer
+        moderation_queue:
+          type: integer
+        top_categories:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+              count:
+                type: integer
+              revenue:
+                type: number
+                format: float
+
+    # ============================================================================
+    # ERROR SCHEMAS
+    # ============================================================================
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time

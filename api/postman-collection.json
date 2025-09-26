@@ -1,0 +1,841 @@
+{
+  "info": {
+    "name": "Live Streaming Tipping Platform API",
+    "description": "Complete API collection for testing the live streaming tipping platform",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://staging-api.livepanty.com/v1",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "stream_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', response.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', response.refresh_token);",
+                  "    pm.collectionVariables.set('user_id', response.user.id);",
+                  "    console.log('User registered and tokens set');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"display_name\": \"Test User\",\n  \"username\": \"testuser\",\n  \"date_of_birth\": \"1990-01-01\",\n  \"country\": \"US\",\n  \"role\": \"performer\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new user account"
+          },
+          "response": []
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', response.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', response.refresh_token);",
+                  "    pm.collectionVariables.set('user_id', response.user.id);",
+                  "    console.log('User logged in and tokens set');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"SecurePass123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Login with email and password"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Get current authenticated user profile"
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', response.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', response.refresh_token);",
+                  "    console.log('Token refreshed');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Refresh JWT access token"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Logout and invalidate session"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{user_id}}"]
+            },
+            "description": "Get user profile by ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Update User Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Updated Name\",\n  \"bio\": \"Updated bio text\",\n  \"is_public\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{user_id}}"]
+            },
+            "description": "Update user profile information"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Preferences",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/{{user_id}}/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{user_id}}", "preferences"]
+            },
+            "description": "Get user preferences and settings"
+          },
+          "response": []
+        },
+        {
+          "name": "Update User Preferences",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notification_email\": true,\n  \"notification_push\": false,\n  \"privacy_level\": \"standard\",\n  \"allow_private_messages\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/{{user_id}}/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{user_id}}", "preferences"]
+            },
+            "description": "Update user preferences"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "KYC",
+      "item": [
+        {
+          "name": "Submit KYC Documents",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "verification_type",
+                  "value": "age_verification",
+                  "type": "text"
+                },
+                {
+                  "key": "document_type",
+                  "value": "drivers_license",
+                  "type": "text"
+                },
+                {
+                  "key": "document_front",
+                  "type": "file",
+                  "src": "/path/to/document.jpg"
+                },
+                {
+                  "key": "selfie",
+                  "type": "file",
+                  "src": "/path/to/selfie.jpg"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/kyc/submit",
+              "host": ["{{base_url}}"],
+              "path": ["kyc", "submit"]
+            },
+            "description": "Submit KYC documents for verification"
+          },
+          "response": []
+        },
+        {
+          "name": "Get KYC Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/kyc/{{kyc_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["kyc", "{{kyc_id}}", "status"]
+            },
+            "description": "Get KYC verification status"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User KYC Verifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/kyc/verifications",
+              "host": ["{{base_url}}"],
+              "path": ["kyc", "verifications"]
+            },
+            "description": "Get all KYC verification attempts for current user"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        {
+          "name": "Get Wallet Balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/wallet/balance",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "balance"]
+            },
+            "description": "Get current user's token balance"
+          },
+          "response": []
+        },
+        {
+          "name": "Buy Tokens",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_tokens\": 1000,\n  \"currency_code\": \"USD\",\n  \"payment_method\": \"card\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/wallet/buy",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "buy"]
+            },
+            "description": "Initiate token purchase"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transaction History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/wallet/transactions?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "transactions"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Get user's transaction history"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Tip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stream_id\": \"{{stream_id}}\",\n  \"to_user_id\": \"{{user_id}}\",\n  \"tokens\": 100,\n  \"message\": \"Great performance!\",\n  \"is_private\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/wallet/transfer",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "transfer"]
+            },
+            "description": "Send tip to performer during stream"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Streaming",
+      "item": [
+        {
+          "name": "Get Live Streams",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/streams?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["streams"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Get list of currently live streams"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Stream",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('stream_id', response.stream_id);",
+                  "    console.log('Stream created:', response.stream_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"My Amazing Stream\",\n  \"description\": \"This is a test stream\",\n  \"category\": \"entertainment\",\n  \"tags\": [\"music\", \"dance\"],\n  \"is_private\": false,\n  \"tip_enabled\": true,\n  \"chat_enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/streams",
+              "host": ["{{base_url}}"],
+              "path": ["streams"]
+            },
+            "description": "Create a new streaming session"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Stream Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}"]
+            },
+            "description": "Get detailed information about a specific stream"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Stream",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated Stream Title\",\n  \"description\": \"Updated description\",\n  \"category\": \"music\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}"]
+            },
+            "description": "Update stream information"
+          },
+          "response": []
+        },
+        {
+          "name": "Start Stream",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}/start",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}", "start"]
+            },
+            "description": "Mark stream as started"
+          },
+          "response": []
+        },
+        {
+          "name": "Join Stream",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"viewer_token\": \"viewer_token_here\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}/join",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}", "join"]
+            },
+            "description": "Join stream as viewer"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Stream Viewers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}/viewers",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}", "viewers"]
+            },
+            "description": "Get list of current viewers"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Stream Tips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}/tips?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}", "tips"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Get tips received during stream"
+          },
+          "response": []
+        },
+        {
+          "name": "End Stream",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/streams/{{stream_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["streams", "{{stream_id}}"]
+            },
+            "description": "End the streaming session"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Payouts",
+      "item": [
+        {
+          "name": "Request Payout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_tokens\": 5000,\n  \"payout_method\": \"bank_transfer\",\n  \"payout_details\": {\n    \"bank_account\": \"encrypted_bank_details\",\n    \"routing_number\": \"encrypted_routing\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payouts/request",
+              "host": ["{{base_url}}"],
+              "path": ["payouts", "request"]
+            },
+            "description": "Request a payout of earned tokens"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Payout Requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payouts/requests",
+              "host": ["{{base_url}}"],
+              "path": ["payouts", "requests"]
+            },
+            "description": "Get user's payout request history"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Moderation",
+      "item": [
+        {
+          "name": "Report Content",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target_type\": \"stream\",\n  \"target_id\": \"{{stream_id}}\",\n  \"report_type\": \"inappropriate_content\",\n  \"reason\": \"Content violates community guidelines\",\n  \"evidence_urls\": [\"https://example.com/screenshot.jpg\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/moderation/report",
+              "host": ["{{base_url}}"],
+              "path": ["moderation", "report"]
+            },
+            "description": "Submit a report for inappropriate content"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Moderation Flags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/moderation/flags",
+              "host": ["{{base_url}}"],
+              "path": ["moderation", "flags"]
+            },
+            "description": "Get moderation flags for review (Admin only)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/users?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "users"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Get all users with pagination (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Approve KYC",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"approve\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/kyc/{{kyc_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "kyc", "{{kyc_id}}", "approve"]
+            },
+            "description": "Approve KYC verification (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Platform Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/analytics/overview?period=week",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "analytics", "overview"],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "week"
+                }
+              ]
+            },
+            "description": "Get platform-wide analytics (Admin only)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Error Testing",
+      "item": [
+        {
+          "name": "Test Rate Limiting",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/wallet/balance",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "balance"]
+            },
+            "description": "Test rate limiting by making many requests"
+          },
+          "response": []
+        },
+        {
+          "name": "Test Invalid Token",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "invalid_token",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Test authentication with invalid token"
+          },
+          "response": []
+        },
+        {
+          "name": "Test Insufficient Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stream_id\": \"{{stream_id}}\",\n  \"to_user_id\": \"{{user_id}}\",\n  \"tokens\": 999999,\n  \"message\": \"This should fail\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/wallet/transfer",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "transfer"]
+            },
+            "description": "Test tip with insufficient balance"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
