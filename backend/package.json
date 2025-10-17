@@ -17,7 +17,7 @@
     "docker:run": "docker run -p 3001:3001 livepanty-backend"
   },
   "dependencies": {
-    "aws-sdk": "^2.1490.0",
+    "aws-sdk": "^2.1692.0",
     "axios": "^1.12.2",
     "bcryptjs": "^2.4.3",
     "bull": "^4.12.2",
@@ -41,7 +41,7 @@
     "mediasoup": "^3.19.4",
     "mediasoup-client": "^3.16.7",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.9.7",
+    "nodemailer": "^6.10.1",
     "pg": "^8.11.3",
     "razorpay": "^2.9.6",
     "redis": "^4.6.10",

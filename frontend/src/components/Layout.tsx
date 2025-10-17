@@ -44,12 +44,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Streams', href: '/dashboard', icon: Video },
     { name: 'Create Stream', href: '/create-stream', icon: Plus },
     { name: 'Wallet', href: '/wallet', icon: Wallet },
+    { name: 'KYC Verification', href: '/kyc', icon: Shield },
     { name: 'Profile', href: '/profile', icon: User },
   ];
 
-  // Add admin link if user is admin
+  // Add admin links if user is admin
   if (user?.role === 'admin') {
-    navigation.push({ name: 'Admin', href: '/admin', icon: Shield });
+    navigation.push({ name: 'Admin Dashboard', href: '/admin-dashboard', icon: Settings });
   }
 
   const isActive = (href: string) => {

@@ -16,6 +16,8 @@ import CreateStream from './pages/CreateStream';
 import Profile from './pages/Profile';
 import Wallet from './pages/Wallet';
 import Admin from './pages/Admin';
+import AdminDashboard from './pages/AdminDashboard';
+import KYCVerification from './pages/KYCVerification';
 import NotFound from './pages/NotFound';
 import TokenPurchase from './components/TokenPurchase';
 
@@ -177,6 +179,26 @@ function App() {
               <ProtectedRoute requireRole="admin">
                 <Layout>
                   <Admin />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/admin-dashboard"
+            element={
+              <ProtectedRoute requireRole="admin">
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/kyc"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <KYCVerification />
                 </Layout>
               </ProtectedRoute>
             }
