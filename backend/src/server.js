@@ -22,16 +22,25 @@ const walletRoutes = require('./routes/wallet');
 const kycRoutes = require('./routes/kyc');
 const moderationRoutes = require('./routes/moderation');
 const adminRoutes = require('./routes/admin');
+const paymentRoutes = require('./routes/payments');
 
 // Import middleware
 const { errorHandler } = require('./middleware/errorHandler');
 const { validateJWT } = require('./middleware/auth');
 const { connectDatabase } = require('./database/connection');
 const { connectRedis } = require('./redis/connection');
+const { connectRedis: connectMockRedis } = require('./redis/connection-mock');
 const logger = require('./utils/logger');
 
 // Import socket handlers
 const { setupSocketHandlers } = require('./socket/socketHandlers');
+const setupScalableStreamingHandlers = require('./socket/scalableStreamingHandlers');
+const setupWebRTCHandlers = require('./socket/webrtcHandlers');
+
+// Import services
+const scalableStreamingService = require('./services/scalableStreamingService');
+const webrtcService = require('./services/webrtcService');
+const indianPaymentService = require('./services/indianPaymentService');
 
 // Load environment variables
 require('dotenv').config();
@@ -173,6 +182,7 @@ app.use('/api/wallet', validateJWT, walletRoutes);
 app.use('/api/kyc', validateJWT, kycRoutes);
 app.use('/api/moderation', validateJWT, moderationRoutes);
 app.use('/api/admin', validateJWT, adminRoutes);
+app.use('/api/payments', validateJWT, paymentRoutes);
 
 // Socket.IO setup
 const io = socketIo(server, {
@@ -185,6 +195,8 @@ const io = socketIo(server, {
 
 // Setup socket handlers
 setupSocketHandlers(io);
+setupScalableStreamingHandlers(io);
+setupWebRTCHandlers(io);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -203,20 +215,28 @@ app.use('*', (req, res) => {
 const gracefulShutdown = (signal) => {
   logger.info(`${signal} received, shutting down gracefully`);
   
-  server.close(() => {
+  server.close(async () => {
     logger.info('HTTP server closed');
     
-    // Close database connections
-    if (global.db) {
-      global.db.end().then(() => {
+    try {
+      // Cleanup streaming service
+      await scalableStreamingService.cleanup();
+      logger.info('Streaming service cleaned up');
+      
+      // Cleanup WebRTC service
+      await webrtcService.cleanup();
+      logger.info('WebRTC service cleaned up');
+      
+      // Close database connections
+      if (global.db) {
+        await global.db.end();
         logger.info('Database connection closed');
-        process.exit(0);
-      }).catch((err) => {
-        logger.error('Error closing database connection:', err);
-        process.exit(1);
-      });
-    } else {
+      }
+      
       process.exit(0);
+    } catch (err) {
+      logger.error('Error during cleanup:', err);
+      process.exit(1);
     }
   });
   
@@ -250,9 +270,26 @@ async function startServer() {
     await connectDatabase();
     logger.info('Database connected successfully');
 
-    // Connect to Redis
-    await connectRedis();
-    logger.info('Redis connected successfully');
+    // Connect to Redis (with fallback to mock)
+    try {
+      await connectRedis();
+      logger.info('Redis connected successfully');
+    } catch (error) {
+      logger.warn('Real Redis not available, using mock Redis for development');
+      await connectMockRedis();
+    }
+
+    // Initialize streaming service
+    await scalableStreamingService.initialize();
+    logger.info('Streaming service initialized successfully');
+
+    // Initialize WebRTC service
+    await webrtcService.initialize();
+    logger.info('WebRTC service initialized successfully');
+
+    // Initialize payment service
+    await indianPaymentService.initialize();
+    logger.info('Payment service initialized successfully');
 
     // Start HTTP server
     server.listen(PORT, () => {

@@ -82,6 +82,56 @@ router.get('/', asyncHandler(async (req, res) => {
 
 /**
  * @swagger
+ * /api/streams/{id}:
+ *   get:
+ *     summary: Get stream by ID
+ *     tags: [Streams]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Stream details retrieved
+ *       404:
+ *         description: Stream not found
+ */
+router.get('/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await query(`
+      SELECT 
+        s.id, s.host_id, u.display_name as host_name, s.title, s.description,
+        s.category, s.tags, s.is_private, s.is_age_restricted, s.status,
+        s.started_at, s.viewer_count, s.peak_viewer_count, s.total_tokens_received,
+        s.thumbnail_url, s.sfu_room_id, s.created_at, s.updated_at
+      FROM streams s
+      JOIN users u ON s.host_id = u.id
+      WHERE s.id = $1 AND s.deleted_at IS NULL
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'STREAM_NOT_FOUND',
+        message: 'Stream not found'
+      });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    logger.error('Get stream by ID error:', error);
+    res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: 'Failed to retrieve stream'
+    });
+  }
+}));
+
+/**
+ * @swagger
  * /api/streams:
  *   post:
  *     summary: Create new stream

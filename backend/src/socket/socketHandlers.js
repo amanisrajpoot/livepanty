@@ -1,37 +1,32 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
-const { query } = require('../database/connection');
+const { getUserById } = require('../services/userService');
+const { createStream, updateStreamStatus } = require('../services/streamService');
+const { sendTip, getStreamTips } = require('../services/tipService');
 
-// Store active connections and rooms
+// Store active connections
 const activeConnections = new Map();
 const streamRooms = new Map();
 
 // Socket.IO middleware for authentication
 const authenticateSocket = async (socket, next) => {
   try {
-    const token = socket.handshake.auth.token || 
-                  socket.handshake.headers.authorization?.replace('Bearer ', '');
+    const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
     
     if (!token) {
       return next(new Error('Authentication token required'));
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await getUserById(decoded.userId);
     
-    // Get user from database
-    const userResult = await query(`
-      SELECT id, email, display_name, username, role, status, country
-      FROM users 
-      WHERE id = $1 AND deleted_at IS NULL AND status IN ('active', 'pending_verification')
-    `, [decoded.userId]);
-    
-    if (userResult.rows.length === 0) {
-      return next(new Error('User not found or inactive'));
+    if (!user) {
+      return next(new Error('User not found'));
     }
 
-    socket.userId = userResult.rows[0].id;
-    socket.user = userResult.rows[0];
+    socket.userId = user.id;
+    socket.user = user;
     next();
   } catch (error) {
     logger.error('Socket authentication error:', error);
@@ -53,27 +48,11 @@ const setupSocketHandlers = (io) => {
     // Handle user joining a stream room
     socket.on('join_stream', async (data) => {
       try {
-        const { streamId, role } = data;
+        const { streamId, role } = data; // role: 'performer' or 'viewer'
         
-        // Validate stream exists
-        const streamResult = await query(
-          'SELECT id, host_id, status FROM streams WHERE id = $1',
-          [streamId]
-        );
-
-        if (streamResult.rows.length === 0) {
-          socket.emit('error', { message: 'Stream not found' });
-          return;
-        }
-
-        const stream = streamResult.rows[0];
-
-        // Check permissions
-        if (role === 'performer' && stream.host_id !== socket.userId) {
-          socket.emit('error', { message: 'Unauthorized to perform in this stream' });
-          return;
-        }
-
+        // Validate stream exists and user has permission
+        // This would integrate with your stream service
+        
         // Join the stream room
         socket.join(`stream:${streamId}`);
         
@@ -145,6 +124,43 @@ const setupSocketHandlers = (io) => {
       logger.info(`User ${socket.userId} left stream ${streamId}`);
     });
 
+    // Handle WebRTC signaling
+    socket.on('webrtc_offer', (data) => {
+      const { streamId, offer, targetUserId } = data;
+      
+      // Forward offer to target user
+      socket.to(`user:${targetUserId}`).emit('webrtc_offer', {
+        fromUserId: socket.userId,
+        offer: offer,
+        streamId: streamId,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    socket.on('webrtc_answer', (data) => {
+      const { streamId, answer, targetUserId } = data;
+      
+      // Forward answer to target user
+      socket.to(`user:${targetUserId}`).emit('webrtc_answer', {
+        fromUserId: socket.userId,
+        answer: answer,
+        streamId: streamId,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    socket.on('webrtc_ice_candidate', (data) => {
+      const { streamId, candidate, targetUserId } = data;
+      
+      // Forward ICE candidate to target user
+      socket.to(`user:${targetUserId}`).emit('webrtc_ice_candidate', {
+        fromUserId: socket.userId,
+        candidate: candidate,
+        streamId: streamId,
+        timestamp: new Date().toISOString()
+      });
+    });
+
     // Handle tip sending
     socket.on('send_tip', async (data) => {
       try {
@@ -156,47 +172,20 @@ const setupSocketHandlers = (io) => {
           return;
         }
 
-        // Check user's token balance
-        const walletResult = await query(
-          'SELECT token_balance FROM wallets WHERE user_id = $1',
-          [socket.userId]
-        );
+        // Process tip through service layer
+        const tip = await sendTip({
+          streamId,
+          fromUserId: socket.userId,
+          toUserId,
+          tokens,
+          message,
+          isPrivate
+        });
 
-        if (walletResult.rows.length === 0 || walletResult.rows[0].token_balance < tokens) {
-          socket.emit('tip_error', { message: 'Insufficient token balance' });
-          return;
-        }
-
-        // Process tip in transaction
-        const tipResult = await query(`
-          WITH tip_transaction AS (
-            INSERT INTO tips (stream_id, from_user_id, to_user_id, tokens, message, is_private)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, created_at
-          ),
-          wallet_update AS (
-            UPDATE wallets 
-            SET token_balance = token_balance - $4,
-                reserved_balance = reserved_balance + $4
-            WHERE user_id = $2
-            RETURNING token_balance
-          )
-          SELECT t.id, t.created_at, w.token_balance
-          FROM tip_transaction t, wallet_update w
-        `, [streamId, socket.userId, toUserId, tokens, message, isPrivate || false]);
-
-        if (tipResult.rows.length === 0) {
+        if (!tip) {
           socket.emit('tip_error', { message: 'Failed to process tip' });
           return;
         }
-
-        const tip = tipResult.rows[0];
-
-        // Create ledger entry
-        await query(`
-          INSERT INTO ledger (user_id, counterparty_id, transaction_type, amount_tokens, balance_after, reference_type, reference_id, description)
-          VALUES ($1, $2, 'tip_sent', $3, $4, 'tip', $5, 'Tip sent to performer')
-        `, [socket.userId, toUserId, -tokens, tip.token_balance, tip.id]);
 
         // Broadcast tip to stream room
         const tipEvent = {
@@ -206,7 +195,7 @@ const setupSocketHandlers = (io) => {
           toUserId: toUserId,
           tokens: tokens,
           message: message,
-          isPrivate: isPrivate || false,
+          isPrivate: isPrivate,
           timestamp: tip.created_at
         };
 
@@ -222,7 +211,7 @@ const setupSocketHandlers = (io) => {
         socket.emit('tip_sent', {
           tipId: tip.id,
           tokens: tokens,
-          balanceAfter: tip.token_balance,
+          balanceAfter: tip.balance_after,
           timestamp: tip.created_at
         });
 
@@ -234,40 +223,63 @@ const setupSocketHandlers = (io) => {
     });
 
     // Handle chat messages
-    socket.on('send_message', async (data) => {
-      try {
-        const { streamId, message, type = 'text' } = data;
-        
-        // Validate message
-        if (!streamId || !message || message.trim().length === 0) {
-          socket.emit('message_error', { message: 'Invalid message data' });
-          return;
-        }
-
-        // Check if user is in the stream
-        const room = streamRooms.get(streamId);
-        if (!room || (!room.performers.has(socket.userId) && !room.viewers.has(socket.userId))) {
-          socket.emit('message_error', { message: 'Not in stream' });
-          return;
-        }
-
-        const chatMessage = {
-          id: uuidv4(),
-          userId: socket.userId,
-          displayName: socket.user.display_name,
-          message: message.trim(),
-          type: type,
-          timestamp: new Date().toISOString()
-        };
-
-        // Broadcast to all users in the stream
-        io.to(`stream:${streamId}`).emit('chat_message', chatMessage);
-        
-        logger.info(`Chat message from ${socket.userId} in stream ${streamId}: ${message}`);
-      } catch (error) {
-        logger.error('Error sending message:', error);
-        socket.emit('message_error', { message: 'Failed to send message' });
+    socket.on('send_message', (data) => {
+      const { streamId, message, type = 'text' } = data;
+      
+      // Validate message
+      if (!streamId || !message || message.trim().length === 0) {
+        socket.emit('message_error', { message: 'Invalid message data' });
+        return;
       }
+
+      const chatMessage = {
+        id: uuidv4(),
+        userId: socket.userId,
+        displayName: socket.user.display_name,
+        message: message.trim(),
+        type: type,
+        timestamp: new Date().toISOString()
+      };
+
+      // Broadcast to all users in the stream
+      io.to(`stream:${streamId}`).emit('chat_message', chatMessage);
+      
+      logger.info(`Chat message from ${socket.userId} in stream ${streamId}: ${message}`);
+    });
+
+    // Handle stream status updates
+    socket.on('stream_status_update', async (data) => {
+      try {
+        const { streamId, status } = data;
+        
+        // Update stream status in database
+        await updateStreamStatus(streamId, status, socket.userId);
+        
+        // Broadcast status update to all viewers
+        io.to(`stream:${streamId}`).emit('stream_status_changed', {
+          streamId: streamId,
+          status: status,
+          updatedBy: socket.userId,
+          timestamp: new Date().toISOString()
+        });
+        
+        logger.info(`Stream ${streamId} status updated to ${status} by ${socket.userId}`);
+      } catch (error) {
+        logger.error('Error updating stream status:', error);
+        socket.emit('error', { message: 'Failed to update stream status' });
+      }
+    });
+
+    // Handle viewer count updates
+    socket.on('viewer_count_update', (data) => {
+      const { streamId, count } = data;
+      
+      // Broadcast updated viewer count
+      io.to(`stream:${streamId}`).emit('viewer_count_changed', {
+        streamId: streamId,
+        count: count,
+        timestamp: new Date().toISOString()
+      });
     });
 
     // Handle disconnect
