@@ -51,7 +51,12 @@ const Register: React.FC = () => {
 
     try {
       const { confirmPassword, ...registrationData } = formData;
-      await register(registrationData);
+      // Ensure role is properly typed
+      const typedRegistrationData = {
+        ...registrationData,
+        role: registrationData.role as 'viewer' | 'performer' | undefined
+      };
+      await register(typedRegistrationData);
       navigate('/dashboard');
     } catch (error) {
       // Error is handled by the store
@@ -358,13 +363,13 @@ const Register: React.FC = () => {
               <div className="ml-3 text-sm">
                 <label htmlFor="terms" className="text-gray-700">
                   I agree to the{' '}
-                  <a href="#" className="text-primary-600 hover:text-primary-500">
+                  <button className="text-primary-600 hover:text-primary-500">
                     Terms of Service
-                  </a>{' '}
+                  </button>{' '}
                   and{' '}
-                  <a href="#" className="text-primary-600 hover:text-primary-500">
+                  <button className="text-primary-600 hover:text-primary-500">
                     Privacy Policy
-                  </a>
+                  </button>
                   . I confirm that I am 18 years or older.
                 </label>
               </div>

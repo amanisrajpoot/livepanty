@@ -101,16 +101,22 @@ const Home: React.FC = () => {
           {!isAuthenticated && (
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
-                to="/register"
+                to="/streams"
                 className="btn-primary text-lg px-8 py-3"
               >
-                Start Watching
+                Browse Streams
+              </Link>
+              <Link
+                to="/quick-register"
+                className="btn-secondary text-lg px-8 py-3"
+              >
+                Join Free
               </Link>
               <Link
                 to="/register?role=performer"
-                className="btn-secondary text-lg px-8 py-3"
+                className="btn-outline text-lg px-8 py-3"
               >
-                Become a Performer
+                Start Streaming
               </Link>
             </div>
           )}
@@ -241,20 +247,20 @@ const Home: React.FC = () => {
             <div>
               <h3 className="text-lg font-semibold mb-4">Support</h3>
               <ul className="space-y-2 text-gray-400">
-                <li><a href="#" className="hover:text-white">Help Center</a></li>
-                <li><a href="#" className="hover:text-white">Contact Us</a></li>
-                <li><a href="#" className="hover:text-white">Community</a></li>
-                <li><a href="#" className="hover:text-white">Guidelines</a></li>
+                <li><button className="hover:text-white text-left">Help Center</button></li>
+                <li><button className="hover:text-white text-left">Contact Us</button></li>
+                <li><button className="hover:text-white text-left">Community</button></li>
+                <li><button className="hover:text-white text-left">Guidelines</button></li>
               </ul>
             </div>
             
             <div>
               <h3 className="text-lg font-semibold mb-4">Legal</h3>
               <ul className="space-y-2 text-gray-400">
-                <li><a href="#" className="hover:text-white">Terms of Service</a></li>
-                <li><a href="#" className="hover:text-white">Privacy Policy</a></li>
-                <li><a href="#" className="hover:text-white">Cookie Policy</a></li>
-                <li><a href="#" className="hover:text-white">Age Verification</a></li>
+                <li><button className="hover:text-white text-left">Terms of Service</button></li>
+                <li><button className="hover:text-white text-left">Privacy Policy</button></li>
+                <li><button className="hover:text-white text-left">Cookie Policy</button></li>
+                <li><button className="hover:text-white text-left">Age Verification</button></li>
               </ul>
             </div>
           </div>

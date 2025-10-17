@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useAuthStore } from './authStore';
 
 interface WalletState {
   tokenBalance: number;
@@ -12,9 +13,10 @@ interface WalletState {
 
 interface WalletActions {
   fetchBalance: () => Promise<void>;
+  refreshBalance: () => Promise<void>;
   fetchTransactions: (limit?: number, offset?: number) => Promise<void>;
   buyTokens: (amount: number, currency?: string) => Promise<void>;
-  sendTip: (streamId: string, toUserId: string, tokens: number, message?: string, isPrivate?: boolean) => Promise<void>;
+  sendTip: (streamId: string, tokens: number, message?: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -75,6 +77,11 @@ export const useWalletStore = create<WalletState & WalletActions>((set, get) => 
         isLoading: false,
       });
     }
+  },
+
+  refreshBalance: async () => {
+    const { fetchBalance } = get();
+    await fetchBalance();
   },
 
   fetchTransactions: async (limit = 20, offset = 0) => {
@@ -147,7 +154,7 @@ export const useWalletStore = create<WalletState & WalletActions>((set, get) => 
     }
   },
 
-  sendTip: async (streamId: string, toUserId: string, tokens: number, message?: string, isPrivate?: boolean) => {
+  sendTip: async (streamId: string, tokens: number, message?: string) => {
     set({ isLoading: true, error: null });
     
     try {
@@ -161,10 +168,8 @@ export const useWalletStore = create<WalletState & WalletActions>((set, get) => 
         },
         body: JSON.stringify({
           stream_id: streamId,
-          to_user_id: toUserId,
           tokens,
           message,
-          is_private: isPrivate,
         }),
       });
 
@@ -198,5 +203,3 @@ export const useWalletStore = create<WalletState & WalletActions>((set, get) => 
   },
 }));
 
-// Import useAuthStore here to avoid circular dependency
-import { useAuthStore } from './authStore';

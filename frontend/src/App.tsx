@@ -8,13 +8,16 @@ import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import QuickRegister from './pages/QuickRegister';
+import GuestStreams from './pages/GuestStreams';
 import Dashboard from './pages/Dashboard';
-import StreamRoom from './pages/StreamRoom';
+import StreamingRoom from './components/StreamingRoom';
 import CreateStream from './pages/CreateStream';
 import Profile from './pages/Profile';
 import Wallet from './pages/Wallet';
 import Admin from './pages/Admin';
 import NotFound from './pages/NotFound';
+import TokenPurchase from './components/TokenPurchase';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode; requireAuth?: boolean; requireRole?: string }> = ({
@@ -76,6 +79,7 @@ function App() {
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Home />} />
+          <Route path="/streams" element={<GuestStreams />} />
           
           <Route
             path="/login"
@@ -91,6 +95,15 @@ function App() {
             element={
               <PublicRoute>
                 <Register />
+              </PublicRoute>
+            }
+          />
+
+          <Route
+            path="/quick-register"
+            element={
+              <PublicRoute>
+                <QuickRegister />
               </PublicRoute>
             }
           />
@@ -111,9 +124,7 @@ function App() {
             path="/stream/:streamId"
             element={
               <ProtectedRoute>
-                <Layout>
-                  <StreamRoom />
-                </Layout>
+                <StreamingRoom />
               </ProtectedRoute>
             }
           />
@@ -147,6 +158,15 @@ function App() {
                 <Layout>
                   <Wallet />
                 </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/buy-tokens"
+            element={
+              <ProtectedRoute>
+                <TokenPurchase />
               </ProtectedRoute>
             }
           />

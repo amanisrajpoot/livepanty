@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
+import { useAuthStore } from './authStore';
 
 interface Stream {
   id: string;
@@ -106,7 +107,13 @@ export const useStreamStore = create<StreamState & StreamActions>((set, get) => 
     set({ isLoading: true, error: null });
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/streams`);
+      const { token } = useAuthStore.getState();
+      
+      const response = await fetch(`${API_BASE_URL}/api/streams`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
 
       if (!response.ok) {
@@ -390,5 +397,3 @@ export const useStreamStore = create<StreamState & StreamActions>((set, get) => 
   },
 }));
 
-// Import useAuthStore here to avoid circular dependency
-import { useAuthStore } from './authStore';

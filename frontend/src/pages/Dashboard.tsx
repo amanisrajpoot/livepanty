@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Star
 } from 'lucide-react';
+// import DebugInfo from '../components/DebugInfo'; // Debug component
 
 const Dashboard: React.FC = () => {
   const { streams, fetchStreams, isLoading, error } = useStreamStore();
@@ -61,6 +62,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="p-6">
+      {/* <DebugInfo /> */}
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-6">
