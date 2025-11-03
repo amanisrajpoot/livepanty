@@ -1,4 +1,3 @@
-version: '3.8'
 
 # Simple single-server deployment
 # All services run on one EC2 instance

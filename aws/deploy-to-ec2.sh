@@ -35,13 +35,33 @@ if [ ! -f "backend/.env" ]; then
     if [ -f "backend/env.example" ]; then
         cp backend/env.example backend/.env
         echo -e "${YELLOW}⚠️  Please edit backend/.env with your production values!${NC}"
-        echo "Press Enter to continue after editing..."
-        read
+        echo -e "${RED}❌ ERROR: backend/.env file is required but not configured!${NC}"
+        echo -e "${RED}❌ Please configure backend/.env with your values before deploying.${NC}"
+        echo ""
+        echo "Edit the file:"
+        echo "  cd backend"
+        echo "  nano .env"
+        echo ""
+        exit 1
     else
         echo -e "${RED}❌ backend/env.example not found. Please create backend/.env manually.${NC}"
         exit 1
     fi
 fi
+
+# Verify .env has required variables
+echo -e "${BLUE}📋 Checking .env file...${NC}"
+if ! grep -q "POSTGRES_PASSWORD=" backend/.env || [ -z "$(grep POSTGRES_PASSWORD= backend/.env | cut -d'=' -f2 | tr -d ' ')" ]; then
+    echo -e "${RED}❌ ERROR: POSTGRES_PASSWORD is not set in backend/.env${NC}"
+    exit 1
+fi
+
+if ! grep -q "JWT_SECRET=" backend/.env || [ -z "$(grep JWT_SECRET= backend/.env | cut -d'=' -f2 | tr -d ' ')" ]; then
+    echo -e "${RED}❌ ERROR: JWT_SECRET is not set in backend/.env${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} .env file exists and has required values"
 
 # Get EC2 public IP
 EC2_PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || echo "localhost")
