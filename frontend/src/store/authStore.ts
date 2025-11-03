@@ -35,6 +35,7 @@ interface AuthState {
 interface AuthActions {
   login: (email: string, password: string) => Promise<void>;
   register: (userData: RegisterData) => Promise<void>;
+  quickRegister: (userData: QuickRegisterData) => Promise<void>;
   logout: () => void;
   refreshAuth: () => Promise<void>;
   updateUser: (userData: Partial<User>) => void;
@@ -49,6 +50,13 @@ interface RegisterData {
   username?: string;
   date_of_birth: string;
   country: string;
+  role?: 'viewer' | 'performer';
+}
+
+interface QuickRegisterData {
+  email: string;
+  password: string;
+  display_name: string;
   role?: 'viewer' | 'performer';
 }
 
@@ -131,6 +139,48 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : 'Registration failed',
+            isLoading: false,
+            isAuthenticated: false,
+          });
+          throw error;
+        }
+      },
+
+      quickRegister: async (userData: QuickRegisterData) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/auth/quick-register`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(userData),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.message || 'Quick registration failed');
+          }
+
+          set({
+            user: data.user,
+            token: data.access_token,
+            refreshToken: data.refresh_token,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+          });
+
+          // Show message if profile completion is needed
+          if (data.requires_completion) {
+            // Could show a toast notification here
+            console.log(data.message);
+          }
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : 'Quick registration failed',
             isLoading: false,
             isAuthenticated: false,
           });

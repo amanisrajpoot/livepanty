@@ -235,49 +235,70 @@ router.post('/transfer', [
       });
     }
 
-    // Process tip in transaction
-    const tipResult = await query(`
-      WITH tip_insert AS (
-        INSERT INTO tips (stream_id, from_user_id, to_user_id, tokens, message, is_private)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, created_at
-      ),
-      wallet_update AS (
-        UPDATE wallets 
-        SET token_balance = token_balance - $4
-        WHERE user_id = $2
-        RETURNING token_balance
-      ),
-      stream_update AS (
-        UPDATE streams 
-        SET total_tips_received = total_tips_received + 1,
-            total_tokens_received = total_tokens_received + $4
-        WHERE id = $1
-      )
-      SELECT t.id, t.created_at, w.token_balance
-      FROM tip_insert t, wallet_update w
-    `, [stream_id, req.user.id, to_user_id, tokens, message, is_private]);
+    // Use tipService for consistent tip processing
+    const { sendTip } = require('../services/tipService');
+    
+    const tip = await sendTip({
+      stream_id,
+      from_user_id: req.user.id,
+      to_user_id: to_user_id,
+      tokens,
+      message,
+      is_private
+    });
 
-    const tip = tipResult.rows[0];
+    if (!tip || !tip.success) {
+      return res.status(500).json({
+        error: 'TIP_PROCESSING_FAILED',
+        message: 'Failed to process tip'
+      });
+    }
 
-    // Create ledger entry for sender
-    await query(`
-      INSERT INTO ledger (user_id, counterparty_id, transaction_type, amount_tokens, balance_after, reference_type, reference_id, description)
-      VALUES ($1, $2, 'tip_sent', $3, $4, 'tip', $5, 'Tip sent to performer')
-    `, [req.user.id, to_user_id, -tokens, tip.token_balance, tip.id]);
+    // Emit real-time balance updates via Socket.IO
+    try {
+      const { io } = require('../server');
+      if (io) {
+        // Get updated balances
+        const senderWallet = await query(`
+          SELECT token_balance FROM wallets WHERE user_id = $1
+        `, [req.user.id]);
+        
+        const recipientWallet = await query(`
+          SELECT token_balance FROM wallets WHERE user_id = $1
+        `, [to_user_id]);
 
-    // Create ledger entry for recipient
-    await query(`
-      INSERT INTO ledger (user_id, counterparty_id, transaction_type, amount_tokens, reference_type, reference_id, description)
-      VALUES ($1, $2, 'tip_received', $3, 'tip', $4, 'Tip received from viewer')
-    `, [to_user_id, req.user.id, tokens, tip.id]);
+        // Update sender's balance
+        io.to(`user:${req.user.id}`).emit('wallet_balance_updated', {
+          tokenBalance: senderWallet.rows[0]?.token_balance || 0,
+          reservedBalance: 0,
+          transaction: {
+            type: 'tip_sent',
+            tokens: -tokens,
+            tipId: tip.id
+          }
+        });
+
+        // Update recipient's balance
+        io.to(`user:${to_user_id}`).emit('wallet_balance_updated', {
+          tokenBalance: recipientWallet.rows[0]?.token_balance || 0,
+          reservedBalance: 0,
+          transaction: {
+            type: 'tip_received',
+            tokens: tokens,
+            tipId: tip.id
+          }
+        });
+      }
+    } catch (socketError) {
+      logger.warn('Failed to emit wallet balance updates:', socketError);
+    }
 
     logger.info(`Tip sent: ${tokens} tokens from ${req.user.id} to ${to_user_id} in stream ${stream_id}`);
 
     res.json({
       tip_id: tip.id,
       tokens: tokens,
-      balance_after: tip.token_balance,
+      balance_after: tip.balance_after,
       message: message,
       is_private: is_private,
       created_at: tip.created_at

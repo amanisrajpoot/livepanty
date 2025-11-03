@@ -117,7 +117,8 @@ class ModerationService {
         contentId,
         reason,
         description,
-        evidence
+        evidence,
+        content // Optional: content text for analysis
       } = reportData;
 
       const result = await query(`
@@ -190,8 +191,22 @@ class ModerationService {
   }
 
   // Get pending reports for moderation
-  async getPendingReports(limit = 50, offset = 0) {
+  async getPendingReports(limit = 50, offset = 0, status = null) {
     try {
+      let whereClause = "WHERE cr.status IN ('pending', 'flagged', 'escalated')";
+      const values = [];
+      let paramCount = 1;
+
+      if (status && status !== 'all') {
+        if (status === 'pending') {
+          whereClause = "WHERE cr.status IN ('pending', 'flagged')";
+        } else {
+          whereClause = "WHERE cr.status = $" + paramCount;
+          values.push(status);
+          paramCount++;
+        }
+      }
+
       const result = await query(`
         SELECT 
           cr.*,
@@ -202,12 +217,13 @@ class ModerationService {
         FROM content_reports cr
         JOIN users u1 ON cr.reporter_id = u1.id
         JOIN users u2 ON cr.reported_user_id = u2.id
-        WHERE cr.status IN ('pending', 'flagged', 'escalated')
+        ${whereClause}
         ORDER BY 
           CASE WHEN cr.status = 'escalated' THEN 1 ELSE 2 END,
+          cr.risk_score DESC,
           cr.created_at DESC
-        LIMIT $1 OFFSET $2
-      `, [limit, offset]);
+        LIMIT $${paramCount} OFFSET $${paramCount + 1}
+      `, [...values, limit, offset]);
 
       return result.rows;
     } catch (error) {
@@ -231,8 +247,8 @@ class ModerationService {
         WHERE id = $5
       `, [status, moderatorId, action, notes, reportId]);
 
-      // If content is approved, take action on the reported user/content
-      if (status === 'approved') {
+      // If content is approved and action is specified, take action on the reported user/content
+      if (status === 'approved' && action && action !== 'no_action') {
         await this.takeModerationAction(reportId, action);
       }
 

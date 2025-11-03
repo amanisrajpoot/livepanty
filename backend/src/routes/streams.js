@@ -4,6 +4,7 @@ const asyncHandler = require('express-async-handler');
 
 const { query } = require('../database/connection');
 const logger = require('../utils/logger');
+const { optionalJWT, validateJWT } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -98,8 +99,20 @@ router.get('/', asyncHandler(async (req, res) => {
  *       404:
  *         description: Stream not found
  */
-router.get('/:id', asyncHandler(async (req, res) => {
+// Public endpoint - allows guest access with optional auth
+router.get('/:id', optionalJWT, asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const isAuthenticated = !!req.user;
+  const userId = req.user?.id;
+
+  // Validate UUID format
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(id)) {
+    return res.status(400).json({
+      error: 'INVALID_STREAM_ID',
+      message: `Invalid stream ID format. Expected UUID format (e.g., "123e4567-e89b-12d3-a456-426614174000"), received: "${id}"`
+    });
+  }
 
   try {
     const result = await query(`
@@ -110,7 +123,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
         s.thumbnail_url, s.sfu_room_id, s.created_at, s.updated_at
       FROM streams s
       JOIN users u ON s.host_id = u.id
-      WHERE s.id = $1 AND s.deleted_at IS NULL
+      WHERE s.id = $1::uuid AND s.deleted_at IS NULL
     `, [id]);
 
     if (result.rows.length === 0) {
@@ -120,12 +133,48 @@ router.get('/:id', asyncHandler(async (req, res) => {
       });
     }
 
-    res.json(result.rows[0]);
+    const stream = result.rows[0];
+
+    // Block private streams for guests
+    if (stream.is_private && !isAuthenticated) {
+      return res.status(403).json({
+        error: 'PRIVATE_STREAM',
+        message: 'This stream is private. Please sign in to view.',
+        requires_auth: true
+      });
+    }
+
+    // Track guest view (for conversion metrics)
+    if (!isAuthenticated) {
+      // Store guest session in Redis or track separately
+      await query(`
+        INSERT INTO guest_stream_views (stream_id, ip_address, user_agent, created_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT DO NOTHING
+      `, [id, req.ip, req.get('User-Agent')]).catch(err => {
+        // Ignore errors if table doesn't exist yet
+        logger.debug('Guest view tracking error (may be expected):', err.message);
+      });
+    }
+
+    res.json({
+      ...stream,
+      is_authenticated: isAuthenticated,
+      can_tip: isAuthenticated,
+      can_chat: isAuthenticated
+    });
   } catch (error) {
     logger.error('Get stream by ID error:', error);
+    
+    // Return more detailed error message in development
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? error.message 
+      : 'Failed to retrieve stream';
+    
     res.status(500).json({
       error: 'INTERNAL_ERROR',
-      message: 'Failed to retrieve stream'
+      message: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 }));
@@ -171,7 +220,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
  *       201:
  *         description: Stream created successfully
  */
-router.post('/', [
+router.post('/', validateJWT, [
   body('title').isLength({ min: 1, max: 200 }).trim(),
   body('description').optional().isLength({ max: 1000 }).trim(),
   body('category').notEmpty().trim(),
@@ -240,57 +289,6 @@ router.post('/', [
   }
 }));
 
-/**
- * @swagger
- * /api/streams/{streamId}:
- *   get:
- *     summary: Get stream details
- *     tags: [Streams]
- *     parameters:
- *       - in: path
- *         name: streamId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *     responses:
- *       200:
- *         description: Stream details retrieved
- *       404:
- *         description: Stream not found
- */
-router.get('/:streamId', asyncHandler(async (req, res) => {
-  const { streamId } = req.params;
-
-  try {
-    const result = await query(`
-      SELECT 
-        s.id, s.host_id, u.display_name as host_name, s.title, s.description,
-        s.category, s.tags, s.is_private, s.is_age_restricted, s.status,
-        s.started_at, s.ended_at, s.viewer_count, s.peak_viewer_count,
-        s.total_tokens_received, s.thumbnail_url, s.created_at
-      FROM streams s
-      JOIN users u ON s.host_id = u.id
-      WHERE s.id = $1 AND s.deleted_at IS NULL
-    `, [streamId]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        error: 'STREAM_NOT_FOUND',
-        message: 'Stream not found'
-      });
-    }
-
-    res.json(result.rows[0]);
-
-  } catch (error) {
-    logger.error('Get stream details error:', error);
-    res.status(500).json({
-      error: 'INTERNAL_ERROR',
-      message: 'Failed to retrieve stream details'
-    });
-  }
-}));
 
 /**
  * @swagger
@@ -309,7 +307,7 @@ router.get('/:streamId', asyncHandler(async (req, res) => {
  *       200:
  *         description: Stream started successfully
  */
-router.post('/:streamId/start', asyncHandler(async (req, res) => {
+router.post('/:streamId/start', validateJWT, asyncHandler(async (req, res) => {
   const { streamId } = req.params;
 
   try {
@@ -380,7 +378,7 @@ router.post('/:streamId/start', asyncHandler(async (req, res) => {
  *       200:
  *         description: Stream ended successfully
  */
-router.delete('/:streamId', asyncHandler(async (req, res) => {
+router.delete('/:streamId', validateJWT, asyncHandler(async (req, res) => {
   const { streamId } = req.params;
 
   try {

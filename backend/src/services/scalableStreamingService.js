@@ -176,7 +176,7 @@ class ScalableStreamingService extends EventEmitter {
       this.stats.activeStreams++;
 
       logger.info(`Created scalable room ${roomId} on worker ${index} for stream ${streamId}`);
-      return router;
+      return room; // Return room object, not just router
     } catch (error) {
       logger.error(`Failed to create room ${roomId}:`, error);
       throw error;

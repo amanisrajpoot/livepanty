@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useAuthStore } from './authStore';
+import { io, Socket } from 'socket.io-client';
 
 interface WalletState {
   tokenBalance: number;
@@ -9,6 +10,7 @@ interface WalletState {
   transactions: Transaction[];
   isLoading: boolean;
   error: string | null;
+  socket: Socket | null;
 }
 
 interface WalletActions {
@@ -18,6 +20,8 @@ interface WalletActions {
   buyTokens: (amount: number, currency?: string) => Promise<void>;
   sendTip: (streamId: string, tokens: number, message?: string) => Promise<void>;
   clearError: () => void;
+  connectSocket: () => void;
+  disconnectSocket: () => void;
 }
 
 interface Transaction {
@@ -44,6 +48,7 @@ export const useWalletStore = create<WalletState & WalletActions>((set, get) => 
   transactions: [],
   isLoading: false,
   error: null,
+  socket: null,
 
   // Actions
   fetchBalance: async () => {
@@ -200,6 +205,48 @@ export const useWalletStore = create<WalletState & WalletActions>((set, get) => 
 
   clearError: () => {
     set({ error: null });
+  },
+
+  connectSocket: () => {
+    const { token } = useAuthStore.getState();
+    if (!token) return;
+
+    const socket = io(API_BASE_URL, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    });
+
+    socket.on('wallet_balance_updated', (data: any) => {
+      set({
+        tokenBalance: data.tokenBalance,
+        reservedBalance: data.reservedBalance || 0,
+      });
+
+      // Refresh transactions if a new transaction was added
+      if (data.transaction) {
+        const { fetchTransactions } = get();
+        fetchTransactions(20, 0);
+      }
+    });
+
+    socket.on('connect', () => {
+      console.log('Wallet socket connected');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Wallet socket disconnected');
+    });
+
+    set({ socket });
+  },
+
+  disconnectSocket: () => {
+    const { socket } = get();
+    if (socket) {
+      socket.disconnect();
+      set({ socket: null });
+    }
   },
 }));
 

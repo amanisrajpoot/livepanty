@@ -180,7 +180,8 @@ router.patch('/admin/verification/:id/status', validateJWT, requireRole(['admin'
       });
     }
 
-    await kycService.updateVerificationStatus(id, status, notes);
+    // Update status with admin ID for tracking
+    await kycService.updateVerificationStatus(id, status, notes, req.user.id);
 
     logger.info(`Admin ${req.user.id} updated verification ${id} status to ${status}`);
 

@@ -1,6 +1,7 @@
 const { query } = require('../database/connection');
 const logger = require('../utils/logger');
 const nodemailer = require('nodemailer');
+const pushNotificationService = require('./pushNotificationService');
 
 class NotificationService {
   constructor() {
@@ -32,10 +33,25 @@ class NotificationService {
       const result = await query(`
         INSERT INTO notifications (user_id, type, title, message, data)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
+        RETURNING id, created_at, is_read, read_at
       `, [userId, type, title, message, JSON.stringify(data)]);
 
       const notificationId = result.rows[0].id;
+
+      // Get full notification data for socket emission
+      const notification = await this.getNotificationById(notificationId);
+
+      // Emit real-time notification to user
+      try {
+        const { broadcastToUser } = require('../socket/socketHandlers');
+        if (notification) {
+          broadcastToUser(userId, 'notification_created', notification);
+          logger.info(`Notification event emitted for user ${userId}: ${type}`);
+        }
+      } catch (socketError) {
+        // Don't fail if socket emission fails
+        logger.warn('Failed to emit notification event:', socketError);
+      }
 
       // Send push notification
       await this.sendPushNotification(userId, { type, title, message, data });
@@ -53,28 +69,56 @@ class NotificationService {
     }
   }
 
+  // Get notification by ID
+  async getNotificationById(notificationId) {
+    try {
+      const result = await query(`
+        SELECT 
+          id, user_id, type, title, message, data, is_read, read_at, created_at
+        FROM notifications
+        WHERE id = $1
+      `, [notificationId]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const notification = result.rows[0];
+      // Parse JSON data if exists
+      if (notification.data) {
+        try {
+          notification.data = typeof notification.data === 'string' 
+            ? JSON.parse(notification.data) 
+            : notification.data;
+        } catch (parseError) {
+          notification.data = null;
+        }
+      }
+
+      return notification;
+    } catch (error) {
+      logger.error('Error getting notification by ID:', error);
+      return null;
+    }
+  }
+
   // Send push notification
   async sendPushNotification(userId, notificationData) {
     try {
-      // Get user's push token
-      const user = await this.getUserPushToken(userId);
-      if (!user || !user.push_token) {
-        return; // No push token available
+      // Use push notification service for FCM/APNs
+      const result = await pushNotificationService.sendPushNotification(userId, notificationData);
+      
+      if (result.sent) {
+        logger.info(`Push notification sent to user ${userId}: ${result.android + result.ios} devices`);
+      } else {
+        logger.info(`Push notification skipped for user ${userId}: ${result.reason || 'No tokens'}`);
       }
 
-      // In production, integrate with FCM/APNs
-      // For now, we'll just log it
-      logger.info(`Push notification sent to user ${userId}: ${notificationData.title}`);
-      
-      // Update notification as push sent
-      await query(`
-        UPDATE notifications 
-        SET push_sent = true 
-        WHERE user_id = $1 AND type = $2 AND created_at > NOW() - INTERVAL '1 minute'
-      `, [userId, notificationData.type]);
-
+      return result;
     } catch (error) {
       logger.error('Error sending push notification:', error);
+      // Don't throw - push notifications are optional
+      return { sent: false, error: error.message };
     }
   }
 
@@ -113,11 +157,11 @@ class NotificationService {
     }
   }
 
-  // Get user's push token
+  // Get user's push token (deprecated - use pushNotificationService)
   async getUserPushToken(userId) {
     try {
       const result = await query(`
-        SELECT push_token FROM users WHERE id = $1
+        SELECT push_tokens FROM users WHERE id = $1
       `, [userId]);
       return result.rows[0];
     } catch (error) {
@@ -196,12 +240,51 @@ class NotificationService {
     const emailTypes = [
       'kyc_approved',
       'kyc_rejected',
+      'kyc_status_updated',
+      'kyc_requires_review',
       'warning',
       'suspension',
       'ban',
       'tip_received'
     ];
     return emailTypes.includes(type);
+  }
+
+  // Send KYC status updated notification
+  async sendKYCStatusUpdatedNotification(userId, status, notes = null) {
+    let title, message, type;
+    
+    switch (status) {
+      case 'approved':
+        title = 'KYC Verification Approved';
+        message = 'Your identity verification has been approved. You can now access all platform features.';
+        type = 'kyc_approved';
+        break;
+      case 'rejected':
+        title = 'KYC Verification Rejected';
+        message = notes 
+          ? `Your identity verification was rejected. Reason: ${notes}. Please resubmit your documents.`
+          : 'Your identity verification was rejected. Please resubmit your documents.';
+        type = 'kyc_rejected';
+        break;
+      case 'requires_review':
+        title = 'KYC Verification Under Review';
+        message = 'Your identity verification is being reviewed by our team. You will be notified once the review is complete.';
+        type = 'kyc_requires_review';
+        break;
+      default:
+        title = 'KYC Status Updated';
+        message = `Your KYC verification status has been updated to: ${status}.`;
+        type = 'kyc_status_updated';
+    }
+    
+    return await this.createNotification(
+      userId,
+      type,
+      title,
+      message,
+      { status, notes }
+    );
   }
 
   // Get user notifications
@@ -252,6 +335,25 @@ class NotificationService {
     } catch (error) {
       logger.error('Error marking all notifications as read:', error);
       throw new Error('Failed to mark all notifications as read');
+    }
+  }
+
+  // Get unread notifications
+  async getUnreadNotifications(userId, limit = 50, offset = 0) {
+    try {
+      const result = await query(`
+        SELECT 
+          id, type, title, message, data, is_read, read_at, created_at
+        FROM notifications
+        WHERE user_id = $1 AND is_read = false
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+      `, [userId, limit, offset]);
+
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting unread notifications:', error);
+      throw new Error('Failed to get unread notifications');
     }
   }
 
@@ -366,6 +468,27 @@ class NotificationService {
       message,
       { reason }
     );
+  }
+
+  // Delete notification
+  async deleteNotification(notificationId, userId) {
+    try {
+      const result = await query(`
+        DELETE FROM notifications 
+        WHERE id = $1 AND user_id = $2
+        RETURNING id
+      `, [notificationId, userId]);
+
+      if (result.rows.length === 0) {
+        throw new Error('Notification not found or unauthorized');
+      }
+
+      logger.info(`Notification ${notificationId} deleted by user ${userId}`);
+      return true;
+    } catch (error) {
+      logger.error('Error deleting notification:', error);
+      throw new Error('Failed to delete notification');
+    }
   }
 
   // Clean up old notifications

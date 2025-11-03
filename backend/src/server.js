@@ -23,6 +23,7 @@ const kycRoutes = require('./routes/kyc');
 const moderationRoutes = require('./routes/moderation');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payments');
+const notificationRoutes = require('./routes/notifications');
 
 // Import middleware
 const { errorHandler } = require('./middleware/errorHandler');
@@ -33,7 +34,7 @@ const { connectRedis: connectMockRedis } = require('./redis/connection-mock');
 const logger = require('./utils/logger');
 
 // Import socket handlers
-const { setupSocketHandlers } = require('./socket/socketHandlers');
+const { setupSocketHandlers, setIOInstance } = require('./socket/socketHandlers');
 const setupScalableStreamingHandlers = require('./socket/scalableStreamingHandlers');
 const setupWebRTCHandlers = require('./socket/webrtcHandlers');
 
@@ -44,6 +45,10 @@ const indianPaymentService = require('./services/indianPaymentService');
 
 // Load environment variables
 require('dotenv').config();
+
+// Initialize Sentry early
+const { initializeSentry } = require('./utils/sentry');
+initializeSentry();
 
 const app = express();
 const server = createServer(app);
@@ -101,6 +106,10 @@ const limiter = rateLimit({
 });
 
 app.use('/api/', limiter);
+
+// Prometheus metrics tracking
+const { trackRequest, metricsHandler } = require('./utils/metrics');
+app.use(trackRequest);
 
 // Session configuration (optional - commented out for now)
 // let redisClient;
@@ -175,14 +184,22 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', validateJWT, userRoutes);
-app.use('/api/streams', validateJWT, streamRoutes);
-app.use('/api/wallet', validateJWT, walletRoutes);
-app.use('/api/kyc', validateJWT, kycRoutes);
-app.use('/api/moderation', validateJWT, moderationRoutes);
-app.use('/api/admin', validateJWT, adminRoutes);
-app.use('/api/payments', validateJWT, paymentRoutes);
+    app.use('/api/auth', authRoutes);
+    app.use('/api/users', validateJWT, userRoutes);
+    app.use('/api/streams', streamRoutes); // Changed to allow guest access
+    app.use('/api/wallet', validateJWT, walletRoutes);
+    app.use('/api/kyc', validateJWT, kycRoutes);
+    app.use('/api/moderation', validateJWT, moderationRoutes);
+    app.use('/api/admin', validateJWT, adminRoutes);
+    app.use('/api/payments', validateJWT, paymentRoutes);
+    app.use('/api/notifications', validateJWT, notificationRoutes);
+    
+    // Push token routes
+    const pushTokenRoutes = require('./routes/pushTokens');
+    app.use('/api/push-tokens', validateJWT, pushTokenRoutes);
+
+    // Metrics endpoint for Prometheus
+    app.get('/metrics', metricsHandler);
 
 // Socket.IO setup
 const io = socketIo(server, {
@@ -192,6 +209,12 @@ const io = socketIo(server, {
   pingInterval: 25000,
   maxHttpBufferSize: 1e6 // 1MB
 });
+
+// Export io instance for use in other modules
+module.exports.io = io;
+
+// Set io instance in socket handlers for external use
+setIOInstance(io);
 
 // Setup socket handlers
 setupSocketHandlers(io);

@@ -322,31 +322,22 @@ const setupStreamingHandlers = (io) => {
 
         const hostId = streamResult.rows[0].host_id;
 
-        // Process tip transaction
-        await query('BEGIN');
+        // Use tipService for consistent tip processing
+        const { sendTip } = require('../services/tipService');
         
         try {
-          // Deduct from sender's wallet
-          await query(`
-            UPDATE wallets 
-            SET token_balance = token_balance - $1, updated_at = NOW()
-            WHERE user_id = $2
-          `, [amount, socket.userId]);
+          const tip = await sendTip({
+            streamId,
+            fromUserId: socket.userId,
+            toUserId: hostId,
+            tokens: amount,
+            message,
+            isPrivate: false
+          });
 
-          // Add to host's wallet
-          await query(`
-            UPDATE wallets 
-            SET token_balance = token_balance + $1, updated_at = NOW()
-            WHERE user_id = $2
-          `, [amount, hostId]);
-
-          // Record transaction
-          await query(`
-            INSERT INTO ledger (from_user_id, to_user_id, amount, transaction_type, description, created_at)
-            VALUES ($1, $2, $3, 'tip', $4, NOW())
-          `, [socket.userId, hostId, amount, message || 'Tip']);
-
-          await query('COMMIT');
+          if (!tip || !tip.success) {
+            throw new Error('Failed to process tip');
+          }
 
           // Notify all users in the room
           socket.to(socket.currentRoom).emit('tip_received', {
@@ -354,14 +345,14 @@ const setupStreamingHandlers = (io) => {
             fromDisplayName: socket.user?.display_name || 'Anonymous',
             amount: amount,
             message: message,
-            timestamp: new Date().toISOString()
+            timestamp: tip.created_at || new Date().toISOString()
           });
 
-          callback({ success: true });
+          callback({ success: true, tip });
           logger.info(`Tip of ${amount} tokens sent from ${socket.userId} to stream ${streamId}`);
         } catch (error) {
-          await query('ROLLBACK');
-          throw error;
+          logger.error('Error processing tip:', error);
+          callback({ error: error.message || 'Failed to send tip' });
         }
       } catch (error) {
         logger.error('Error sending tip:', error);

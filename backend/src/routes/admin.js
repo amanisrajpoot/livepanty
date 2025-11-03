@@ -38,15 +38,19 @@ router.get('/users', validateJWT, requireRole(['admin']), asyncHandler(async (re
     if (kyc_verified !== undefined) filters.kyc_verified = kyc_verified === 'true';
     if (search) filters.search = search;
 
-    const users = await adminService.getUserManagementData(
+    const result = await adminService.getUserManagementData(
       parseInt(limit),
       parseInt(offset),
       filters
     );
 
+    // Get total count
+    const totalResult = await adminService.getUserManagementDataCount(filters);
+
     res.json({
       success: true,
-      users
+      users: result.users || result,
+      total: totalResult
     });
   } catch (error) {
     logger.error('Get user management data error:', error);
@@ -193,8 +197,8 @@ router.get('/system/health', validateJWT, requireRole(['admin']), asyncHandler(a
 // Get analytics data
 router.get('/analytics', validateJWT, requireRole(['admin']), asyncHandler(async (req, res) => {
   try {
-    const { period = '7d' } = req.query;
-    const analytics = await adminService.getAnalyticsData(period);
+    const { period = '7d', type = 'users' } = req.query;
+    const analytics = await adminService.getAnalyticsData(period, type);
 
     res.json({
       success: true,

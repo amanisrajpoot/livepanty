@@ -5,12 +5,24 @@ let pool;
 
 const connectDatabase = async () => {
   try {
+    // Check if DATABASE_URL is set
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+
+    // Neon and most cloud databases require SSL
+    // If DATABASE_URL contains 'neon' or 'vercel' or has sslmode=require, use SSL
+    const requiresSSL = process.env.DATABASE_URL.includes('neon') || 
+                        process.env.DATABASE_URL.includes('vercel') ||
+                        process.env.DATABASE_URL.includes('sslmode=require') ||
+                        process.env.NODE_ENV === 'production';
+
     const config = {
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: requiresSSL ? { rejectUnauthorized: false } : false,
       max: 20, // Maximum number of clients in the pool
       idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-      connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
+      connectionTimeoutMillis: 10000, // Increased to 10 seconds for cloud databases
       query_timeout: 30000, // Query timeout in milliseconds
       statement_timeout: 30000, // Statement timeout in milliseconds
     };
@@ -35,7 +47,13 @@ const connectDatabase = async () => {
 
     return pool;
   } catch (error) {
-    logger.error('❌ Database connection failed:', error);
+    logger.error('❌ Database connection failed:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+      stack: error.stack
+    });
     throw error;
   }
 };

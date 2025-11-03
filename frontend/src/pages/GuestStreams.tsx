@@ -19,116 +19,58 @@ interface Stream {
   isPrivate: boolean;
 }
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+
 const GuestStreams: React.FC = () => {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Dummy data for demo
+  // Fetch real streams from API (works for guests too)
   useEffect(() => {
-    const dummyStreams: Stream[] = [
-      {
-        id: '1',
-        title: 'Welcome to my room! 💕',
-        performer: {
-          name: 'Emma_Rose',
-          avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face',
-          isOnline: true,
-          rating: 4.9
-        },
-        thumbnail: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=300&fit=crop',
-        viewers: 1247,
-        isLive: true,
-        category: 'cam',
-        tags: ['new', 'friendly', 'chat'],
-        isPrivate: false
-      },
-      {
-        id: '2',
-        title: 'Dancing & Music 🎵',
-        performer: {
-          name: 'Luna_Moon',
-          avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&h=150&fit=crop&crop=face',
-          isOnline: true,
-          rating: 4.8
-        },
-        thumbnail: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=300&fit=crop',
-        viewers: 892,
-        isLive: true,
-        category: 'dance',
-        tags: ['dance', 'music', 'fun'],
-        isPrivate: false
-      },
-      {
-        id: '3',
-        title: 'Private Session 🔒',
-        performer: {
-          name: 'Sophia_Secret',
-          avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&h=150&fit=crop&crop=face',
-          isOnline: true,
-          rating: 4.9
-        },
-        thumbnail: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=300&fit=crop',
-        viewers: 156,
-        isLive: true,
-        category: 'private',
-        tags: ['private', 'exclusive'],
-        isPrivate: true
-      },
-      {
-        id: '4',
-        title: 'Gaming & Chat 🎮',
-        performer: {
-          name: 'Gamer_Girl_99',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop&crop=face',
-          isOnline: true,
-          rating: 4.7
-        },
-        thumbnail: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=400&h=300&fit=crop',
-        viewers: 634,
-        isLive: true,
-        category: 'gaming',
-        tags: ['gaming', 'chat', 'fun'],
-        isPrivate: false
-      },
-      {
-        id: '5',
-        title: 'Fitness & Wellness 💪',
-        performer: {
-          name: 'Fit_Angel',
-          avatar: 'https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=150&h=150&fit=crop&crop=face',
-          isOnline: true,
-          rating: 4.8
-        },
-        thumbnail: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop',
-        viewers: 423,
-        isLive: true,
-        category: 'fitness',
-        tags: ['fitness', 'wellness', 'motivation'],
-        isPrivate: false
-      },
-      {
-        id: '6',
-        title: 'Art & Creativity 🎨',
-        performer: {
-          name: 'Creative_Soul',
-          avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
-          isOnline: true,
-          rating: 4.9
-        },
-        thumbnail: 'https://images.unsplash.com/photo-1513475382585-d06e58bcb0e0?w=400&h=300&fit=crop',
-        viewers: 287,
-        isLive: true,
-        category: 'art',
-        tags: ['art', 'creative', 'drawing'],
-        isPrivate: false
+    const fetchStreams = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        const response = await fetch(`${API_BASE_URL}/api/streams?limit=50`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch streams');
+        }
+        
+        const data = await response.json();
+        
+        // Transform API response to component format
+        const transformedStreams: Stream[] = data.streams.map((stream: any) => ({
+          id: stream.id,
+          title: stream.title || 'Untitled Stream',
+          performer: {
+            name: stream.host_name || 'Anonymous',
+            avatar: 'https://ui-avatars.com/api/?name=' + encodeURIComponent(stream.host_name || 'User'),
+            isOnline: stream.status === 'live',
+            rating: 4.5 // Default rating, could be fetched separately
+          },
+          thumbnail: stream.thumbnail_url || 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=300&fit=crop',
+          viewers: stream.viewer_count || 0,
+          isLive: stream.status === 'live',
+          category: stream.category || 'general',
+          tags: stream.tags || [],
+          isPrivate: stream.is_private || false
+        }));
+        
+        setStreams(transformedStreams);
+      } catch (err) {
+        console.error('Error fetching streams:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load streams');
+        // Keep empty array on error, user will see empty state
+      } finally {
+        setIsLoading(false);
       }
-    ];
+    };
 
-    setTimeout(() => {
-      setStreams(dummyStreams);
-      setIsLoading(false);
-    }, 1000);
+    fetchStreams();
   }, []);
 
   const categories = [
@@ -220,6 +162,13 @@ const GuestStreams: React.FC = () => {
           </div>
         </div>
 
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <p className="text-red-600 text-sm">{error}</p>
+          </div>
+        )}
+
         {/* Streams Grid */}
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -232,6 +181,20 @@ const GuestStreams: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        ) : filteredStreams.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-lg shadow-sm">
+            <Video className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No streams available</h3>
+            <p className="text-gray-600 mb-6">
+              There are no live streams at the moment. Check back later!
+            </p>
+            <Link
+              to="/quick-register"
+              className="inline-block bg-primary-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+            >
+              Create Account to Start Streaming
+            </Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

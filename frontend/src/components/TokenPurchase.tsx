@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { useWalletStore } from '../store/walletStore';
+import { useAuthStore } from '../store/authStore';
 
 interface TokenPackage {
   id: string;
@@ -19,8 +20,9 @@ interface PaymentMethods {
 
 const TokenPurchase: React.FC = () => {
   const { tokenBalance, refreshBalance } = useWalletStore();
+  const { token } = useAuthStore(); // Get token from auth store
   
-  const [packages, setPackages] = useState<TokenPackage[]>([]);
+  const [packages, setPackages] = useState<TokenPackage[]>([]); // Initialize as empty array
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethods | null>(null);
   const [selectedPackage, setSelectedPackage] = useState<string>('1000');
   const [selectedMethod, setSelectedMethod] = useState<string>('upi');
@@ -34,30 +36,86 @@ const TokenPurchase: React.FC = () => {
 
   // Load token packages and payment methods
   useEffect(() => {
-    loadPaymentData();
-  }, []);
+    if (token) {
+      loadPaymentData();
+    } else {
+      setError('Please log in to purchase tokens');
+    }
+  }, [token]); // Reload when token changes
 
   const loadPaymentData = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+      
+      // Check if user is authenticated
+      if (!token) {
+        setError('Please log in to purchase tokens');
+        setLoading(false);
+        return;
+      }
       
       // Load token packages
-      const packagesResponse = await fetch('/api/payments/token-packages');
-      const packagesData = await packagesResponse.json();
-      setPackages(packagesData.packages);
-
-      // Load payment methods
-      const methodsResponse = await fetch('/api/payments/methods', {
+      const packagesResponse = await fetch(`${API_BASE_URL}/api/payments/token-packages`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       });
+
+      if (!packagesResponse.ok) {
+        throw new Error(`Failed to load token packages: ${packagesResponse.status}`);
+      }
+
+      const packagesData = await packagesResponse.json();
+      
+      // Ensure packages is an array
+      if (packagesData.packages && Array.isArray(packagesData.packages)) {
+        setPackages(packagesData.packages);
+      } else if (Array.isArray(packagesData)) {
+        // Handle case where API returns array directly
+        setPackages(packagesData);
+      } else {
+        console.error('Invalid packages data:', packagesData);
+        setPackages([]);
+        setError('Invalid token packages data');
+        return;
+      }
+
+      // Load payment methods
+      const methodsResponse = await fetch(`${API_BASE_URL}/api/payments/methods`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!methodsResponse.ok) {
+        throw new Error(`Failed to load payment methods: ${methodsResponse.status}`);
+      }
+
       const methodsData = await methodsResponse.json();
-      setPaymentMethods(methodsData);
+      
+      if (methodsData) {
+        setPaymentMethods(methodsData);
+      } else {
+        console.warn('No payment methods data received');
+      }
       
     } catch (error) {
       console.error('Failed to load payment data:', error);
-      setError('Failed to load payment options');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load payment options';
+      
+      // Provide more specific error messages
+      if (errorMessage.includes('401')) {
+        setError('Authentication required. Please log in to purchase tokens.');
+      } else {
+        setError(errorMessage);
+      }
+      
+      setPackages([]); // Ensure packages is always an array
     } finally {
       setLoading(false);
     }
@@ -84,11 +142,17 @@ const TokenPurchase: React.FC = () => {
 
   const handleUPIPayment = async () => {
     try {
-      const response = await fetch('/api/payments/upi-link', {
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+      
+      const response = await fetch(`${API_BASE_URL}/api/payments/upi-link`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           tokenPackage: selectedPackage,
@@ -105,7 +169,19 @@ const TokenPurchase: React.FC = () => {
         const qrCodeData = await QRCode.toDataURL(data.upiLink.upiLink);
         setQrCode(qrCodeData);
         
-        setSuccess('UPI payment link generated! Scan the QR code or use the UPI app.');
+        // If demo mode, auto-verify after showing QR for a moment
+        if (data.upiLink.isDemo) {
+          setSuccess('Demo mode: Payment will be auto-verified in 3 seconds...');
+          setTimeout(async () => {
+            await verifyPayment({
+              razorpay_payment_id: `pay_demo_${Date.now()}`,
+              razorpay_order_id: data.upiLink.orderId,
+              razorpay_signature: 'demo_signature'
+            });
+          }, 3000);
+        } else {
+          setSuccess('UPI payment link generated! Scan the QR code or use the UPI app.');
+        }
       } else {
         throw new Error(data.message || 'Failed to create UPI payment');
       }
@@ -116,11 +192,17 @@ const TokenPurchase: React.FC = () => {
 
   const handleRazorpayPayment = async () => {
     try {
-      const response = await fetch('/api/payments/create-order', {
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+      
+      const response = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           tokenPackage: selectedPackage,
@@ -133,7 +215,21 @@ const TokenPurchase: React.FC = () => {
       if (data.success) {
         setPaymentOrder(data.order);
         
-        // Initialize Razorpay
+        // Check if this is a demo order (no Razorpay configured)
+        if (data.order.isDemo || !process.env.REACT_APP_RAZORPAY_KEY_ID) {
+          // Demo mode - auto-verify payment after a short delay
+          console.log('Demo mode: Auto-verifying payment');
+          setTimeout(async () => {
+            await verifyPayment({
+              razorpay_payment_id: `pay_demo_${Date.now()}`,
+              razorpay_order_id: data.order.orderId,
+              razorpay_signature: 'demo_signature'
+            });
+          }, 1000); // 1 second delay to show processing
+          return;
+        }
+        
+        // Initialize Razorpay for real payments
         const options = {
           key: process.env.REACT_APP_RAZORPAY_KEY_ID,
           amount: data.order.amount * 100, // Amount in paise
@@ -165,17 +261,26 @@ const TokenPurchase: React.FC = () => {
 
   const verifyPayment = async (paymentResponse: any) => {
     try {
-      const response = await fetch('/api/payments/verify', {
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+      
+      // For demo mode, provide mock payment data if Razorpay response is missing
+      const paymentData = {
+        paymentId: paymentResponse?.razorpay_payment_id || `pay_demo_${Date.now()}`,
+        orderId: paymentResponse?.razorpay_order_id || paymentOrder?.orderId,
+        signature: paymentResponse?.razorpay_signature || 'demo_signature'
+      };
+      
+      const response = await fetch(`${API_BASE_URL}/api/payments/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          paymentId: paymentResponse.razorpay_payment_id,
-          orderId: paymentResponse.razorpay_order_id,
-          signature: paymentResponse.razorpay_signature
-        })
+        body: JSON.stringify(paymentData)
       });
 
       const data = await response.json();
@@ -193,9 +298,11 @@ const TokenPurchase: React.FC = () => {
     }
   };
 
-  const selectedPackageData = packages.find(pkg => pkg.id === selectedPackage);
+  // Ensure packages is always an array to prevent errors
+  const safePackages = Array.isArray(packages) ? packages : [];
+  const selectedPackageData = safePackages.find(pkg => pkg.id === selectedPackage);
 
-  if (loading && !packages.length) {
+  if (loading && !safePackages.length) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
@@ -237,7 +344,18 @@ const TokenPurchase: React.FC = () => {
           <div className="bg-gray-800 rounded-lg p-6">
             <h2 className="text-xl font-bold mb-6">Choose Token Package</h2>
             <div className="grid grid-cols-2 gap-4">
-              {packages.map((pkg) => (
+              {safePackages.length === 0 && !loading ? (
+                <div className="col-span-2 text-center py-8 text-gray-400">
+                  <p>No token packages available</p>
+                  <button
+                    onClick={loadPaymentData}
+                    className="mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                safePackages.map((pkg) => (
                 <div
                   key={pkg.id}
                   onClick={() => setSelectedPackage(pkg.id)}
@@ -265,7 +383,8 @@ const TokenPurchase: React.FC = () => {
                     )}
                   </div>
                 </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 

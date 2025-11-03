@@ -201,23 +201,67 @@ class AdminService {
         SELECT 
           u.id, u.email, u.display_name, u.username, u.role, u.status,
           u.kyc_verified, u.created_at, u.last_login_at,
-          w.token_balance,
-          COUNT(cr.id) as report_count,
-          COUNT(uw.id) as warning_count
+          COALESCE(w.token_balance, 0) as token_balance,
+          COUNT(DISTINCT cr.id) as report_count,
+          COUNT(DISTINCT uw.id) as warning_count
         FROM users u
         LEFT JOIN wallets w ON u.id = w.user_id
         LEFT JOIN content_reports cr ON u.id = cr.reported_user_id
         LEFT JOIN user_warnings uw ON u.id = uw.user_id
         ${whereClause}
-        GROUP BY u.id, w.token_balance
+        GROUP BY u.id, u.email, u.display_name, u.username, u.role, u.status, u.kyc_verified, u.created_at, u.last_login_at, w.token_balance
         ORDER BY u.created_at DESC
         LIMIT $${paramCount - 1} OFFSET $${paramCount}
       `, params);
 
-      return result.rows;
+      return { users: result.rows };
     } catch (error) {
       logger.error('Error getting user management data:', error);
       throw new Error('Failed to get user management data');
+    }
+  }
+
+  // Get user management data count
+  async getUserManagementDataCount(filters = {}) {
+    try {
+      let whereClause = 'WHERE 1=1';
+      const params = [];
+      let paramCount = 0;
+
+      if (filters.role) {
+        paramCount++;
+        whereClause += ` AND role = $${paramCount}`;
+        params.push(filters.role);
+      }
+
+      if (filters.status) {
+        paramCount++;
+        whereClause += ` AND status = $${paramCount}`;
+        params.push(filters.status);
+      }
+
+      if (filters.kyc_verified !== undefined) {
+        paramCount++;
+        whereClause += ` AND kyc_verified = $${paramCount}`;
+        params.push(filters.kyc_verified);
+      }
+
+      if (filters.search) {
+        paramCount++;
+        whereClause += ` AND (display_name ILIKE $${paramCount} OR email ILIKE $${paramCount} OR username ILIKE $${paramCount})`;
+        params.push(`%${filters.search}%`);
+      }
+
+      const result = await query(`
+        SELECT COUNT(*) as total
+        FROM users u
+        ${whereClause}
+      `, params);
+
+      return parseInt(result.rows[0].total);
+    } catch (error) {
+      logger.error('Error getting user management data count:', error);
+      throw new Error('Failed to get user management data count');
     }
   }
 
@@ -402,9 +446,9 @@ class AdminService {
   }
 
   // Get analytics data
-  async getAnalyticsData(period = '7d') {
+  async getAnalyticsData(period = '7d', type = 'users') {
     try {
-      const cacheKey = `analytics_${period}`;
+      const cacheKey = `analytics_${period}_${type}`;
       const cached = this.getCachedData(cacheKey);
       if (cached) return cached;
 
@@ -423,18 +467,55 @@ class AdminService {
           interval = '1 day';
       }
 
-      const result = await query(`
-        SELECT 
-          DATE_TRUNC('${interval}', created_at) as period,
-          COUNT(*) as user_count
-        FROM users
-        WHERE created_at >= NOW() - INTERVAL '${period}'
-        GROUP BY DATE_TRUNC('${interval}', created_at)
-        ORDER BY period
-      `);
+      let result;
+      if (type === 'users') {
+        result = await query(`
+          SELECT 
+            DATE_TRUNC('${interval}', created_at) as period,
+            COUNT(*) as user_count
+          FROM users
+          WHERE created_at >= NOW() - INTERVAL '${period}'
+          GROUP BY DATE_TRUNC('${interval}', created_at)
+          ORDER BY period
+        `);
+      } else if (type === 'streams') {
+        result = await query(`
+          SELECT 
+            DATE_TRUNC('${interval}', created_at) as period,
+            COUNT(*) as stream_count
+          FROM streams
+          WHERE created_at >= NOW() - INTERVAL '${period}'
+          GROUP BY DATE_TRUNC('${interval}', created_at)
+          ORDER BY period
+        `);
+      } else if (type === 'revenue') {
+        result = await query(`
+          SELECT 
+            DATE_TRUNC('${interval}', created_at) as period,
+            COALESCE(SUM(amount_tokens), 0) as revenue,
+            COUNT(*) as transaction_count
+          FROM ledger
+          WHERE created_at >= NOW() - INTERVAL '${period}'
+            AND transaction_type = 'purchase'
+          GROUP BY DATE_TRUNC('${interval}', created_at)
+          ORDER BY period
+        `);
+      } else {
+        // Default to users
+        result = await query(`
+          SELECT 
+            DATE_TRUNC('${interval}', created_at) as period,
+            COUNT(*) as user_count
+          FROM users
+          WHERE created_at >= NOW() - INTERVAL '${period}'
+          GROUP BY DATE_TRUNC('${interval}', created_at)
+          ORDER BY period
+        `);
+      }
 
       const analytics = {
         period,
+        type,
         data: result.rows,
         generatedAt: new Date()
       };

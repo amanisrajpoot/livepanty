@@ -52,9 +52,160 @@ const router = express.Router();
 
 /**
  * @swagger
+ * /api/auth/quick-register:
+ *   post:
+ *     summary: Quick register - minimal fields for fast signup
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - display_name
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *               display_name:
+ *                 type: string
+ *                 minLength: 2
+ *                 maxLength: 100
+ *               role:
+ *                 type: string
+ *                 enum: [viewer, performer]
+ *                 default: viewer
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ */
+router.post('/quick-register', [
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  body('display_name').isLength({ min: 2, max: 100 }).trim(),
+  body('role').optional().isIn(['viewer', 'performer'])
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: 'Invalid request parameters',
+      details: errors.array()
+    });
+  }
+
+  const {
+    email,
+    password,
+    display_name,
+    role = 'viewer'
+  } = req.body;
+
+  // Check if user already exists
+  const existingUser = await query(
+    'SELECT id FROM users WHERE email = $1',
+    [email]
+  );
+
+  if (existingUser.rows.length > 0) {
+    return res.status(409).json({
+      error: 'USER_EXISTS',
+      message: 'User with this email already exists'
+    });
+  }
+
+  try {
+    // Hash password
+    const saltRounds = 12;
+    const password_hash = await bcrypt.hash(password, saltRounds);
+
+    // Generate user ID
+    const userId = uuidv4();
+
+    // Generate tokens
+    const accessToken = jwt.sign(
+      { userId, email, role },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' } // Longer expiry for better UX
+    );
+
+    const refreshToken = jwt.sign(
+      { userId, email, type: 'refresh' },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    // Generate username from email if not provided
+    const username = email.split('@')[0] + '_' + Date.now().toString().slice(-6);
+
+    // Create user in transaction (without country/DOB - can be added later)
+    const result = await transaction(async (client) => {
+      // Insert user with minimal required fields
+      const userResult = await client.query(`
+        INSERT INTO users (id, email, password_hash, display_name, username, role, status, country, date_of_birth)
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending_verification', 'US', '1990-01-01')
+        RETURNING id, email, display_name, username, role, status, created_at
+      `, [userId, email, password_hash, display_name, username, role]);
+
+      const user = userResult.rows[0];
+
+      // Create wallet
+      await client.query(`
+        INSERT INTO wallets (user_id, token_balance, conversion_rate)
+        VALUES ($1, 0, 100.0)
+      `, [user.id]);
+
+      // Create user preferences
+      await client.query(`
+        INSERT INTO user_preferences (user_id)
+        VALUES ($1)
+      `, [user.id]);
+
+      // Log registration
+      await client.query(`
+        INSERT INTO audit_logs (user_id, action, resource_type, resource_id, ip_address, user_agent)
+        VALUES ($1, 'user_quick_registered', 'user', $1, $2, $3)
+      `, [user.id, req.ip, req.get('User-Agent')]);
+
+      return user;
+    });
+
+    logger.info(`Quick registration: ${email} (${role})`);
+
+    res.status(201).json({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_in: 86400, // 24 hours
+      token_type: 'Bearer',
+      user: result,
+      requires_completion: true, // Flag to prompt for additional info later
+      message: 'Account created! Complete your profile to unlock all features.'
+    });
+
+  } catch (error) {
+    logger.error('Quick registration error:', error);
+    res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: 'Registration failed'
+    });
+  }
+}));
+
+/**
+ * @swagger
  * /api/auth/register:
  *   post:
- *     summary: Register a new user
+ *     summary: Register a new user (full registration)
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -160,15 +311,18 @@ router.post('/register', [
     const saltRounds = 12;
     const password_hash = await bcrypt.hash(password, saltRounds);
 
+    // Generate user ID
+    const userId = uuidv4();
+
     // Generate tokens
     const accessToken = jwt.sign(
-      { userId: uuidv4(), email, role },
+      { userId, email, role },
       process.env.JWT_SECRET,
-      { expiresIn: '1h' }
+      { expiresIn: '24h' }
     );
 
     const refreshToken = jwt.sign(
-      { userId: uuidv4(), email, type: 'refresh' },
+      { userId, email, type: 'refresh' },
       process.env.JWT_SECRET,
       { expiresIn: '30d' }
     );
@@ -177,10 +331,10 @@ router.post('/register', [
     const result = await transaction(async (client) => {
       // Insert user
       const userResult = await client.query(`
-        INSERT INTO users (email, password_hash, display_name, username, role, status, country, date_of_birth)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO users (id, email, password_hash, display_name, username, role, status, country, date_of_birth)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id, email, display_name, username, role, status, country, created_at
-      `, [email, password_hash, display_name, username, role, 'pending_verification', country, date_of_birth]);
+      `, [userId, email, password_hash, display_name, username, role, 'pending_verification', country, date_of_birth]);
 
       const user = userResult.rows[0];
 
@@ -210,7 +364,7 @@ router.post('/register', [
     res.status(201).json({
       access_token: accessToken,
       refresh_token: refreshToken,
-      expires_in: 3600,
+      expires_in: 86400,
       token_type: 'Bearer',
       user: result
     });
@@ -304,11 +458,11 @@ router.post('/login', [
       });
     }
 
-    // Generate tokens
+    // Generate tokens (longer expiry for better UX)
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '1h' }
+      { expiresIn: '24h' } // Increased from 1h to 24h
     );
 
     const refreshToken = jwt.sign(
@@ -335,7 +489,7 @@ router.post('/login', [
     res.json({
       access_token: accessToken,
       refresh_token: refreshToken,
-      expires_in: 3600,
+      expires_in: 86400, // 24 hours
       token_type: 'Bearer',
       user: {
         id: user.id,
@@ -416,7 +570,7 @@ router.post('/refresh', asyncHandler(async (req, res) => {
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '1h' }
+      { expiresIn: '24h' }
     );
 
     const newRefreshToken = jwt.sign(
@@ -428,7 +582,7 @@ router.post('/refresh', asyncHandler(async (req, res) => {
     res.json({
       access_token: accessToken,
       refresh_token: newRefreshToken,
-      expires_in: 3600,
+      expires_in: 86400, // 24 hours
       token_type: 'Bearer',
       user
     });

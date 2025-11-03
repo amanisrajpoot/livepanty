@@ -1,0 +1,26 @@
+{
+  "name": "livepanty",
+  "version": "1.0.0",
+  "description": "Live streaming platform with KYC, moderation, and payment features",
+  "private": true,
+  "scripts": {
+    "setup": "./scripts/setup-env.sh",
+    "start:dev": "echo 'Starting development servers...' && echo 'Backend: cd backend && npm run dev' && echo 'Frontend: cd frontend && npm start'",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm start",
+    "deploy": "./scripts/deploy.sh",
+    "health": "./scripts/health-check.sh",
+    "backup": "./scripts/backup.sh",
+    "test": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test",
+    "test:e2e": "cd frontend && npm run test:e2e"
+  },
+  "keywords": [
+    "live-streaming",
+    "webrtc",
+    "react",
+    "nodejs"
+  ],
+  "author": "LivePanty Team",
+  "license": "Proprietary"
+}

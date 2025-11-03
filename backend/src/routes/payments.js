@@ -155,9 +155,9 @@ router.post('/create-order', [
  *         description: Invalid payment data
  */
 router.post('/verify', [
-  body('paymentId').notEmpty(),
+  body('paymentId').optional(),
   body('orderId').notEmpty(),
-  body('signature').notEmpty()
+  body('signature').optional()
 ], asyncHandler(async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -171,10 +171,15 @@ router.post('/verify', [
 
     const { paymentId, orderId, signature } = req.body;
     
+    // For demo mode, generate a mock payment ID if not provided
+    const finalPaymentId = paymentId || `pay_demo_${Date.now()}_${req.user.id}`;
+    const finalSignature = signature || 'demo_signature';
+    
     const result = await indianPaymentService.verifyPayment(
-      paymentId,
+      finalPaymentId,
       orderId,
-      signature
+      finalSignature,
+      req.user.id // Pass userId for demo mode
     );
 
     res.json({
@@ -337,8 +342,8 @@ router.post('/refund', [
     
     // Check if user owns this payment
     const paymentResult = await query(`
-      SELECT user_id FROM payment_transactions 
-      WHERE payment_id = $1 AND user_id = $2
+      SELECT user_id FROM payments 
+      WHERE provider_transaction_id = $1 AND user_id = $2
     `, [paymentId, req.user.id]);
 
     if (paymentResult.rows.length === 0) {

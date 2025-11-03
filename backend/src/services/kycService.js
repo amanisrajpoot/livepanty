@@ -2,6 +2,7 @@ const { query } = require('../database/connection');
 const logger = require('../utils/logger');
 const AWS = require('aws-sdk');
 const crypto = require('crypto');
+const notificationService = require('./notificationService');
 
 // Configure AWS S3
 const s3 = new AWS.S3({
@@ -144,7 +145,7 @@ class KYCService {
   }
 
   // Update verification status
-  async updateVerificationStatus(verificationId, status, notes = null) {
+  async updateVerificationStatus(verificationId, status, notes = null, reviewedBy = null) {
     try {
       await query(`
         UPDATE kyc_verifications 
@@ -152,14 +153,60 @@ class KYCService {
         WHERE id = $3
       `, [status, notes, verificationId]);
 
+      // Get verification details for socket emission
+      const verification = await this.getVerificationById(verificationId);
+      
       // If approved, update user status
       if (status === 'approved') {
-        const verification = await this.getVerificationById(verificationId);
         await query(`
           UPDATE users 
           SET kyc_verified = true, kyc_verified_at = NOW()
           WHERE id = $1
         `, [verification.user_id]);
+      }
+
+      // Send notification to user
+      try {
+        await notificationService.sendKYCStatusUpdatedNotification(
+          verification.user_id,
+          status,
+          notes
+        );
+        logger.info(`KYC notification sent to user ${verification.user_id} for status ${status}`);
+      } catch (notificationError) {
+        // Don't fail the update if notification fails
+        logger.warn('Failed to send KYC notification:', notificationError);
+      }
+
+      // Emit real-time update via Socket.IO
+      try {
+        const { broadcastToUser, broadcastToAdmins } = require('../socket/socketHandlers');
+        
+        // Notify the user about their status update
+        broadcastToUser(verification.user_id, 'kyc_status_updated', {
+          verificationId: verificationId,
+          userId: verification.user_id,
+          status: status,
+          notes: notes,
+          timestamp: new Date().toISOString(),
+          reviewedBy: reviewedBy,
+          reviewedAt: new Date().toISOString()
+        });
+
+        // Notify admins about the verification update
+        broadcastToAdmins('kyc_verification_updated', {
+          verificationId: verificationId,
+          userId: verification.user_id,
+          status: status,
+          action: 'updated',
+          timestamp: new Date().toISOString(),
+          reviewedBy: reviewedBy
+        });
+
+        logger.info(`KYC status update event emitted for verification ${verificationId}`);
+      } catch (socketError) {
+        // Don't fail the update if socket emission fails
+        logger.warn('Failed to emit KYC status update event:', socketError);
       }
 
       logger.info(`KYC verification ${verificationId} status updated to ${status}`);

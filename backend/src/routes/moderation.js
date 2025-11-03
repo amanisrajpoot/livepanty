@@ -101,8 +101,8 @@ router.get('/history', validateJWT, asyncHandler(async (req, res) => {
 // Admin: Get pending reports
 router.get('/admin/reports', validateJWT, requireRole(['admin', 'moderator']), asyncHandler(async (req, res) => {
   try {
-    const { limit = 50, offset = 0 } = req.query;
-    const reports = await moderationService.getPendingReports(parseInt(limit), parseInt(offset));
+    const { limit = 50, offset = 0, status } = req.query;
+    const reports = await moderationService.getPendingReports(parseInt(limit), parseInt(offset), status || null);
 
     res.json({
       success: true,

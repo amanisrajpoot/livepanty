@@ -1,4 +1,5 @@
 const logger = require('../utils/logger');
+const { captureException } = require('../utils/sentry');
 
 /**
  * Global error handling middleware
@@ -7,6 +8,19 @@ const logger = require('../utils/logger');
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
+
+  // Capture error in Sentry
+  captureException(err, {
+    request: {
+      url: req.originalUrl,
+      method: req.method,
+      headers: req.headers,
+      query: req.query,
+      body: req.body,
+      params: req.params
+    },
+    user: req.user || null
+  });
 
   // Log error
   logger.error('Error occurred:', {

@@ -3,36 +3,122 @@ const logger = require('../utils/logger');
 
 const sendTip = async (tipData) => {
   try {
-    const { from_user_id, to_user_id, stream_id, amount, message, is_private = false } = tipData;
+    // Support both naming conventions
+    const fromUserId = tipData.from_user_id || tipData.fromUserId;
+    const toUserId = tipData.to_user_id || tipData.toUserId;
+    const streamId = tipData.stream_id || tipData.streamId;
+    const tokens = tipData.tokens || tipData.amount;
+    const message = tipData.message || 'Tip';
+    const isPrivate = tipData.is_private || tipData.isPrivate || false;
+    
+    if (!fromUserId || !toUserId || !tokens || tokens <= 0) {
+      throw new Error('Invalid tip data');
+    }
     
     await query('BEGIN');
     
     try {
+      // Get sender's balance before
+      const senderWalletResult = await query(`
+        SELECT token_balance FROM wallets WHERE user_id = $1
+      `, [fromUserId]);
+      
+      if (senderWalletResult.rows.length === 0) {
+        throw new Error('Sender wallet not found');
+      }
+      
+      const senderBalanceBefore = senderWalletResult.rows[0].token_balance;
+      
+      if (senderBalanceBefore < tokens) {
+        throw new Error('Insufficient balance');
+      }
+      
+      // Get recipient's balance before
+      const recipientWalletResult = await query(`
+        SELECT token_balance FROM wallets WHERE user_id = $1
+      `, [toUserId]);
+      
+      const recipientBalanceBefore = recipientWalletResult.rows.length > 0 
+        ? recipientWalletResult.rows[0].token_balance 
+        : 0;
+      
       // Deduct from sender's wallet
+      const senderBalanceAfter = senderBalanceBefore - tokens;
       await query(`
         UPDATE wallets 
-        SET token_balance = token_balance - $1, updated_at = NOW()
+        SET token_balance = $1, updated_at = NOW()
         WHERE user_id = $2
-      `, [amount, from_user_id]);
+      `, [senderBalanceAfter, fromUserId]);
 
-      // Add to receiver's wallet
-      await query(`
-        UPDATE wallets 
-        SET token_balance = token_balance + $1, updated_at = NOW()
-        WHERE user_id = $2
-      `, [amount, to_user_id]);
+      // Calculate recipient balance after
+      const recipientBalanceAfter = recipientBalanceBefore + tokens;
+      
+      // Create or update recipient's wallet
+      if (recipientWalletResult.rows.length === 0) {
+        await query(`
+          INSERT INTO wallets (user_id, currency_code, token_balance, created_at, updated_at)
+          VALUES ($1, 'USD', $2, NOW(), NOW())
+        `, [toUserId, recipientBalanceAfter]);
+      } else {
+        // Add to receiver's wallet
+        await query(`
+          UPDATE wallets 
+          SET token_balance = $1, updated_at = NOW()
+          WHERE user_id = $2
+        `, [recipientBalanceAfter, toUserId]);
+      }
 
-      // Record transaction
+      // Insert tip record
+      let tipRecord;
+      if (streamId) {
+        const tipResult = await query(`
+          INSERT INTO tips (stream_id, from_user_id, to_user_id, tokens, message, is_private)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id, created_at
+        `, [streamId, fromUserId, toUserId, tokens, message, isPrivate]);
+        tipRecord = tipResult.rows[0];
+      }
+
+      // Record transaction in ledger for sender (tip_sent)
       await query(`
         INSERT INTO ledger (
-          user_id, counterparty_id, amount_tokens, transaction_type, 
-          description, reference_id, reference_type, created_at
-        ) VALUES ($1, $2, $3, 'tip', $4, $5, 'stream', NOW())
-      `, [from_user_id, to_user_id, amount, message || 'Tip', stream_id]);
+          user_id, counterparty_id, transaction_type, amount_tokens,
+          balance_before, balance_after, reference_id, reference_type, description, created_at
+        ) VALUES ($1, $2, 'tip_sent', $3, $4, $5, $6, 'tip', $7, NOW())
+      `, [
+        fromUserId, 
+        toUserId, 
+        -tokens, // Negative for debit
+        senderBalanceBefore, 
+        senderBalanceAfter,
+        tipRecord?.id || streamId || null,
+        message || 'Tip sent'
+      ]);
+
+      // Record transaction in ledger for recipient (tip_received)
+      await query(`
+        INSERT INTO ledger (
+          user_id, counterparty_id, transaction_type, amount_tokens,
+          balance_before, balance_after, reference_id, reference_type, description, created_at
+        ) VALUES ($1, $2, 'tip_received', $3, $4, $5, $6, 'tip', $7, NOW())
+      `, [
+        toUserId,
+        fromUserId,
+        tokens, // Positive for credit
+        recipientBalanceBefore,
+        recipientBalanceAfter,
+        tipRecord?.id || streamId || null,
+        message || 'Tip received'
+      ]);
 
       await query('COMMIT');
       
-      return { success: true };
+      return {
+        id: tipRecord?.id || null,
+        success: true,
+        balance_after: senderBalanceAfter,
+        created_at: tipRecord?.created_at || new Date().toISOString()
+      };
     } catch (error) {
       await query('ROLLBACK');
       throw error;

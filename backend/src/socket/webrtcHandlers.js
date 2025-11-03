@@ -1,5 +1,5 @@
 const logger = require('../utils/logger');
-const webrtcService = require('../services/webrtcService');
+const scalableStreamingService = require('../services/scalableStreamingService');
 const jwt = require('jsonwebtoken');
 const { query } = require('../database/connection');
 
@@ -29,21 +29,40 @@ const verifySocketJWT = async (token) => {
 };
 
 const setupWebRTCHandlers = (io) => {
-  // Authentication middleware
+  // Authentication middleware - allow optional auth for guests
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token;
+      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
+      
       if (!token) {
-        return next(new Error('Authentication required'));
+        // Allow guest connections for viewing
+        socket.userId = null;
+        socket.user = null;
+        socket.isGuest = true;
+        return next();
       }
 
-      const user = await verifySocketJWT(token);
-      socket.userId = user.id;
-      socket.user = user;
+      try {
+        const user = await verifySocketJWT(token);
+        socket.userId = user.id;
+        socket.user = user;
+        socket.isGuest = false;
+      } catch (error) {
+        // Invalid token - treat as guest
+        logger.debug('WebRTC authentication failed, allowing guest access:', error.message);
+        socket.userId = null;
+        socket.user = null;
+        socket.isGuest = true;
+      }
+      
       next();
     } catch (error) {
       logger.error('WebRTC authentication error:', error);
-      next(new Error('Authentication failed'));
+      // Allow guest connections even on error
+      socket.userId = null;
+      socket.user = null;
+      socket.isGuest = true;
+      next();
     }
   });
 
@@ -69,8 +88,18 @@ const setupWebRTCHandlers = (io) => {
 
         logger.info(`Creating/joining room: ${roomId}`);
         
-        // Create or get room
-        const room = await webrtcService.createRoom(roomId);
+        // Create or get room using scalable streaming service
+        let mediasoupRoom = await scalableStreamingService.getRoom(roomId);
+        if (!mediasoupRoom) {
+          await scalableStreamingService.createRoom(roomId, roomId);
+          mediasoupRoom = await scalableStreamingService.getRoom(roomId);
+        }
+        
+        // Determine role
+        const role = socket.user?.role === 'performer' ? 'performer' : 'viewer';
+        
+        // Add participant
+        await scalableStreamingService.addParticipant(roomId, socket.id, role);
         
         // Store current room
         const userSocketData = socketData.get(socket.id);
@@ -82,8 +111,8 @@ const setupWebRTCHandlers = (io) => {
         callback({
           success: true,
           roomId: roomId,
-          rtpCapabilities: room.router.rtpCapabilities,
-          existingProducers: Array.from(room.producers.keys())
+          rtpCapabilities: mediasoupRoom.router.rtpCapabilities,
+          existingProducers: Array.from(mediasoupRoom.producers.keys())
         });
 
         // Notify others in the room
@@ -110,26 +139,29 @@ const setupWebRTCHandlers = (io) => {
           return callback({ error: 'Not in a room' });
         }
 
-        const transportInfo = await webrtcService.createWebRtcTransport(
-          data.currentRoom, 
+        // Create transport using scalable streaming service
+        const transport = await scalableStreamingService.createTransport(
+          data.currentRoom,
+          socket.id,
           direction
         );
 
         // Store transport info
         data.transports.set(direction, {
-          id: transportInfo.id,
-          direction: direction
+          id: transport.id,
+          direction: direction,
+          transport: transport // Store actual transport object
         });
 
         callback({
           success: true,
-          id: transportInfo.id,
-          iceParameters: transportInfo.iceParameters,
-          iceCandidates: transportInfo.iceCandidates,
-          dtlsParameters: transportInfo.dtlsParameters
+          id: transport.id,
+          iceParameters: transport.iceParameters,
+          iceCandidates: transport.iceCandidates,
+          dtlsParameters: transport.dtlsParameters
         });
 
-        logger.info(`Created ${direction} transport ${transportInfo.id} for user ${socket.userId}`);
+        logger.info(`Created ${direction} transport ${transport.id} for user ${socket.userId}`);
       } catch (error) {
         logger.error('Error creating transport:', error);
         callback({ error: 'Failed to create transport' });
@@ -146,11 +178,21 @@ const setupWebRTCHandlers = (io) => {
           return callback({ error: 'Not in a room' });
         }
 
-        await webrtcService.connectWebRtcTransport(
-          data.currentRoom,
-          transportId,
-          dtlsParameters
-        );
+        // Get transport from stored data by transportId
+        let transportData = null;
+        for (const [dir, transportInfo] of data.transports) {
+          if (transportInfo.id === transportId) {
+            transportData = transportInfo;
+            break;
+          }
+        }
+        
+        if (!transportData || !transportData.transport) {
+          return callback({ error: 'Transport not found' });
+        }
+        
+        // Connect transport
+        await transportData.transport.connect({ dtlsParameters });
 
         callback({ success: true });
         logger.info(`Transport ${transportId} connected for user ${socket.userId}`);
@@ -175,29 +217,35 @@ const setupWebRTCHandlers = (io) => {
           return callback({ error: 'Send transport not found' });
         }
 
-        // For now, we'll simulate producer creation
-        // In a real implementation, you'd use the actual mediasoup producer
-        const producerId = `producer_${socket.userId}_${Date.now()}`;
-        
-        data.producers.set(producerId, {
-          id: producerId,
+        // Create producer using scalable streaming service
+        const producer = await scalableStreamingService.createProducer(
+          data.currentRoom,
+          socket.id,
+          kind,
+          rtpParameters
+        );
+
+        // Store producer info
+        data.producers.set(producer.id, {
+          id: producer.id,
           kind: kind,
-          userId: socket.userId
+          userId: socket.userId,
+          producer: producer
         });
 
         // Notify others in the room
         socket.to(data.currentRoom).emit('new_producer', {
-          producerId: producerId,
+          producerId: producer.id,
           userId: socket.userId,
           kind: kind
         });
 
         callback({
           success: true,
-          id: producerId
+          id: producer.id
         });
 
-        logger.info(`Producer ${producerId} created for user ${socket.userId}`);
+        logger.info(`Producer ${producer.id} created for user ${socket.userId}`);
       } catch (error) {
         logger.error('Error creating producer:', error);
         callback({ error: 'Failed to create producer' });
@@ -219,27 +267,33 @@ const setupWebRTCHandlers = (io) => {
           return callback({ error: 'Receive transport not found' });
         }
 
-        // For now, we'll simulate consumer creation
-        // In a real implementation, you'd use the actual mediasoup consumer
-        const consumerId = `consumer_${socket.userId}_${producerId}_${Date.now()}`;
-        
-        data.consumers.set(consumerId, {
-          id: consumerId,
+        // Create consumer using scalable streaming service
+        const consumer = await scalableStreamingService.createConsumer(
+          data.currentRoom,
+          socket.id,
+          producerId,
+          rtpCapabilities
+        );
+
+        // Store consumer info
+        data.consumers.set(consumer.id, {
+          id: consumer.id,
           producerId: producerId,
-          userId: socket.userId
+          userId: socket.userId,
+          consumer: consumer
         });
 
         callback({
           success: true,
-          id: consumerId,
+          id: consumer.id,
           producerId: producerId,
-          kind: 'video', // Simplified
-          rtpParameters: {}, // Simplified
-          type: 'simple',
-          producerPaused: false
+          kind: consumer.kind,
+          rtpParameters: consumer.rtpParameters,
+          type: consumer.type,
+          producerPaused: consumer.producerPaused
         });
 
-        logger.info(`Consumer ${consumerId} created for producer ${producerId}`);
+        logger.info(`Consumer ${consumer.id} created for producer ${producerId}`);
       } catch (error) {
         logger.error('Error creating consumer:', error);
         callback({ error: 'Failed to create consumer' });

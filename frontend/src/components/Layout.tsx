@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useWalletStore } from '../store/walletStore';
+import NotificationCenter from './NotificationCenter';
 import { 
   Home, 
   Video, 
@@ -12,7 +13,8 @@ import {
   Menu, 
   X,
   Settings,
-  Shield
+  Shield,
+  Bell
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -22,16 +24,78 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
   const location = useLocation();
   const navigate = useNavigate();
+  const socketRef = useRef<any>(null);
   
-  const { user, logout } = useAuthStore();
+  const { user, logout, token } = useAuthStore();
   const { tokenBalance, fetchBalance } = useWalletStore();
 
   // Fetch wallet balance when component mounts
   React.useEffect(() => {
     fetchBalance();
   }, [fetchBalance]);
+
+  // Fetch unread notification count
+  useEffect(() => {
+    if (!token || !user) return;
+
+    const fetchUnreadCount = async () => {
+      try {
+        const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+        const response = await fetch(`${API_BASE_URL}/api/notifications/unread/count`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setUnreadNotificationCount(data.count || 0);
+        }
+      } catch (error) {
+        console.error('Error fetching unread count:', error);
+      }
+    };
+
+    fetchUnreadCount();
+
+    // Set up socket connection for real-time updates
+    try {
+      const { io } = require('socket.io-client');
+      const socket = io(process.env.REACT_APP_API_URL || 'http://localhost:3001', {
+        auth: {
+          token,
+        },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+      });
+
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        console.log('Layout socket connected');
+      });
+
+      // Listen for new notifications
+      socket.on('notification_created', () => {
+        fetchUnreadCount();
+      });
+
+      // Cleanup on unmount
+      return () => {
+        if (socket) {
+          socket.disconnect();
+          socketRef.current = null;
+        }
+      };
+    } catch (error) {
+      console.error('Error setting up socket connection:', error);
+    }
+  }, [token, user]);
 
   const handleLogout = () => {
     logout();
@@ -101,7 +165,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 {user?.display_name}
               </p>
               <p className="text-xs text-gray-500 truncate">
-                {user?.role === 'performer' ? 'Performer' : 'Viewer'}
+                {user?.role === 'admin' ? 'Admin' : user?.role === 'performer' ? 'Performer' : 'Viewer'}
               </p>
             </div>
           </div>
@@ -168,6 +232,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 </div>
               </div>
 
+              {/* Notifications */}
+              <div className="relative">
+                <button
+                  onClick={() => setNotificationCenterOpen(true)}
+                  className="relative p-2 rounded-lg hover:bg-gray-50 transition-colors"
+                  title="Notifications"
+                >
+                  <Bell className="h-5 w-5 text-gray-600" />
+                  {unreadNotificationCount > 0 && (
+                    <span className="absolute top-0 right-0 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center transform translate-x-1/2 -translate-y-1/2">
+                      {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
               {/* User menu */}
               <div className="relative">
                 <button
@@ -202,7 +282,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         Wallet
                       </Link>
                       <Link
-                        to="/profile"
+                        to="/settings"
                         className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         onClick={() => setUserMenuOpen(false)}
                       >
@@ -230,6 +310,35 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Notification Center */}
+      <NotificationCenter
+        isOpen={notificationCenterOpen}
+        onClose={() => {
+          setNotificationCenterOpen(false);
+          // Refresh unread count when closing
+          if (token && user) {
+            const fetchUnreadCount = async () => {
+              try {
+                const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+                const response = await fetch(`${API_BASE_URL}/api/notifications/unread/count`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                });
+                if (response.ok) {
+                  const data = await response.json();
+                  setUnreadNotificationCount(data.count || 0);
+                }
+              } catch (error) {
+                console.error('Error fetching unread count:', error);
+              }
+            };
+            fetchUnreadCount();
+          }
+        }}
+      />
     </div>
   );
 };
