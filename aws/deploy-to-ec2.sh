@@ -106,7 +106,7 @@ if ! docker buildx version > /dev/null 2>&1; then
     else
         # Manual buildx installation
         mkdir -p ~/.docker/cli-plugins
-        BUILDX_VERSION="v0.11.2"
+        BUILDX_VERSION="v0.17.0"
         if [ "$(uname -m)" == "x86_64" ]; then
             ARCH="amd64"
         elif [ "$(uname -m)" == "aarch64" ]; then

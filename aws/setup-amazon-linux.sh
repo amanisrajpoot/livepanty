@@ -87,7 +87,7 @@ fi
 # Install Docker Buildx (required for docker compose build)
 echo -e "${BLUE}📦 Installing Docker Buildx...${NC}"
 mkdir -p ~/.docker/cli-plugins
-BUILDX_VERSION="v0.11.2"
+BUILDX_VERSION="v0.17.0"
 if [ "$(uname -m)" == "x86_64" ]; then
     ARCH="amd64"
 elif [ "$(uname -m)" == "aarch64" ]; then
