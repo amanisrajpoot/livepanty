@@ -97,6 +97,31 @@ if ! command -v docker compose &> /dev/null; then
     exit 1
 fi
 
+# Check and install buildx if needed
+if ! docker buildx version > /dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️  Docker Buildx not found. Installing...${NC}"
+    if [ -f "aws/fix-buildx.sh" ]; then
+        chmod +x aws/fix-buildx.sh
+        ./aws/fix-buildx.sh
+    else
+        # Manual buildx installation
+        mkdir -p ~/.docker/cli-plugins
+        BUILDX_VERSION="v0.11.2"
+        if [ "$(uname -m)" == "x86_64" ]; then
+            ARCH="amd64"
+        elif [ "$(uname -m)" == "aarch64" ]; then
+            ARCH="arm64"
+        else
+            ARCH="amd64"
+        fi
+        curl -L "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
+            -o ~/.docker/cli-plugins/docker-buildx
+        chmod +x ~/.docker/cli-plugins/docker-buildx
+        docker buildx install || true
+        docker buildx create --name mybuilder --use || true
+    fi
+fi
+
 # Stop existing containers
 echo -e "${BLUE}🛑 Stopping existing containers...${NC}"
 docker compose -f $COMPOSE_FILE down || true
@@ -107,7 +132,103 @@ echo -e "${BLUE}📥 Pulling latest images (if applicable)...${NC}"
 
 # Build images
 echo -e "${BLUE}🏗️  Building Docker images...${NC}"
-docker compose -f $COMPOSE_FILE build
+
+# Check if buildx is available, if not use regular build
+if docker buildx version > /dev/null 2>&1; then
+    echo -e "${BLUE}Using buildx for building...${NC}"
+    docker compose -f $COMPOSE_FILE build
+else
+    echo -e "${YELLOW}⚠️  Buildx not available, using regular build...${NC}"
+    # Use regular docker build instead
+    echo -e "${BLUE}Building backend...${NC}"
+    docker build -f backend/Dockerfile.prod -t livepanty-backend:latest ./backend
+    
+    echo -e "${BLUE}Building frontend...${NC}"
+    # For frontend, we need to pass build args
+    docker build \
+        --build-arg REACT_APP_API_URL="${REACT_APP_API_URL:-http://localhost:3001/api}" \
+        --build-arg REACT_APP_WS_URL="${REACT_APP_WS_URL:-http://localhost:3001}" \
+        -f frontend/Dockerfile.prod \
+        -t livepanty-frontend:latest \
+        ./frontend
+    
+    echo -e "${BLUE}Updating docker-compose to use pre-built images...${NC}"
+    # Create a temporary compose file that uses pre-built images
+    cat > /tmp/docker-compose-temp.yml <<EOF
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: livepanty-postgres
+    environment:
+      POSTGRES_DB: livepanty_prod
+      POSTGRES_USER: livepanty
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+    env_file:
+      - ./backend/.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - livepanty-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: livepanty-redis
+    command: redis-server --appendonly yes --requirepass \${REDIS_PASSWORD}
+    env_file:
+      - ./backend/.env
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - livepanty-network
+
+  backend:
+    image: livepanty-backend:latest
+    container_name: livepanty-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    env_file:
+      - ./backend/.env
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - livepanty-network
+
+  frontend:
+    image: livepanty-frontend:latest
+    container_name: livepanty-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - livepanty-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  livepanty-network:
+    driver: bridge
+EOF
+    COMPOSE_FILE="/tmp/docker-compose-temp.yml"
+fi
 
 # Start services
 echo -e "${BLUE}🚀 Starting services...${NC}"

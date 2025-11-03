@@ -84,6 +84,26 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}⚠️  Or run: newgrp docker${NC}"
 fi
 
+# Install Docker Buildx (required for docker compose build)
+echo -e "${BLUE}📦 Installing Docker Buildx...${NC}"
+mkdir -p ~/.docker/cli-plugins
+BUILDX_VERSION="v0.11.2"
+if [ "$(uname -m)" == "x86_64" ]; then
+    ARCH="amd64"
+elif [ "$(uname -m)" == "aarch64" ]; then
+    ARCH="arm64"
+else
+    ARCH="amd64"
+fi
+
+curl -L "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${ARCH}" \
+    -o ~/.docker/cli-plugins/docker-buildx
+chmod +x ~/.docker/cli-plugins/docker-buildx
+$SUDO cp ~/.docker/cli-plugins/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx 2>/dev/null || true
+
+# Initialize buildx
+docker buildx version || docker buildx install || true
+
 # Install Docker Compose V2
 echo -e "${BLUE}📦 Installing Docker Compose...${NC}"
 
@@ -92,7 +112,7 @@ if $SUDO yum list available docker-compose-plugin 2>/dev/null | grep -q docker-c
     $SUDO yum install -y docker-compose-plugin
 else
     # Install Docker Compose standalone (fallback)
-    DOCKER_COMPOSE_VERSION="v2.21.0"
+    DOCKER_COMPOSE_VERSION="v2.23.0"
     echo -e "${BLUE}📥 Downloading Docker Compose ${DOCKER_COMPOSE_VERSION}...${NC}"
     
     if [ "$(uname -m)" == "x86_64" ]; then
